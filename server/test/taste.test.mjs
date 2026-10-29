@@ -7,8 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.MEDIA_LOCAL = "1"; // never the real bucket
+process.env.DB_PATH ??= ":memory:"; // offers are written through db.mjs; never the dev database
 process.env.MEDIA_DIR = mkdtempSync(join(tmpdir(), "gloo-taste-"));
-const { tailorRole, resolveEntity, entityIdFor, RESERVE, MIN_PICKS, norm } = await import("../src/taste.mjs");
+const { tailorRole, tailorTerm, resolveEntity, entityIdFor, RESERVE, MIN_PICKS, norm } = await import("../src/taste.mjs");
 
 const role = { id: "chole", part: "chole", sound_like: "cola", pick: { question: "Say your favorite cola.", options: [
   { name: "Coca-Cola", wiki: "Coca-Cola", say: ["coke"], qloo: { entity: "Coca-Cola", type: "brand" }, connection: "c" },
@@ -138,4 +139,25 @@ test("resolveEntity: known IDs cost nothing; describe runs once and only with bu
   assert.equal(calls, 1);
   assert.equal(await resolveEntity(call, "Somewhere", "locality", { budget: plenty }), null); // not a rankable type
   assert.equal(calls, 1);
+});
+
+test("tailorTerm: a card already picked is kept as shown, with no call; the cards ahead are ranked with the fresh signals", async () => {
+  const ahead = { ...role, id: "in", part: "in", sound_like: null, pick: { ...role.pick, options: role.pick.options.map((o) => ({ ...o })) } };
+  const term = { id: "t-skip", roles: [{ ...role, id: "chole" }, ahead] };
+  const sent = [];
+  const call = async (op, args) => { sent.push({ op, option_type: args.option_type }); return { status: "ok", results: [
+    { entity_id: "mock-pepsi", name: "Pepsi", affinity: 0.9 }, { entity_id: "mock-coke", name: "Coca-Cola", affinity: 0.4 }] }; };
+  const out = await tailorTerm(term, "sid-skip", call, { signals, budget: plenty, skip: new Set(["chole"]) });
+  const by = (id) => out.roles.find((r) => r.id === id).pick;
+  assert.deepEqual(by("chole").tailoring, { source: "kept", reason: "already picked" });
+  assert.deepEqual(by("chole").options.map((o) => o.name), role.pick.options.map((o) => o.name));
+  assert.ok(by("chole").options.every((o) => o.taste === undefined));
+  assert.equal(by("in").tailoring.source, "taste");
+  assert.deepEqual(by("in").options.slice(0, 2).map((o) => o.name), ["Pepsi-Cola", "Coca-Cola"]);
+  assert.deepEqual(sent, [{ op: "rank", option_type: "brand" }], "one call, for the card ahead only");
+  // Nothing was skipped: both cards ranked, two calls.
+  sent.length = 0;
+  const all = await tailorTerm(term, "sid-skip", call, { signals, budget: plenty });
+  assert.ok(all.roles.every((r) => r.pick.tailoring.source === "taste"));
+  assert.equal(sent.length, 2);
 });

@@ -253,20 +253,19 @@ test("taste: two picks become Qloo signals and the next pick cards are ranked fo
   assert.deepEqual(by("in").options.map((o) => o.name), ["Penguin", "Aspirin", "Aladdin", "Tintin"]);
   assert.ok(by("in").options[0].taste > by("in").options[1].taste);
   assert.equal(by("in").options[2].taste, undefined);
-  // chole: the learner's own pick (Pepsi) leads its card without a call; the other three colas are ranked by one call.
-  assert.deepEqual(by("chole").options.map((o) => o.name), ["Pepsi-Cola", "RC Cola", "Inca Kola", "Coca-Cola"]);
-  assert.equal(by("chole").options[0].taste, 1);
-  // cysto: Twisted Sister is the learner's own pick, so it leads; the two films are ranked by one call; the one other band is not worth a call.
-  assert.deepEqual(by("cysto").tailoring.types, ["movie"]);
-  assert.deepEqual(by("cysto").options.map((o) => o.name), ["Twisted Sister", "Sisters (2015)", "Sister Act", "Sister Sledge"]);
+  // chole and cysto are already picked: kept as shown, no call, so a card never moves under its reveal.
+  assert.equal(by("chole").tailoring.source, "kept"); assert.equal(by("chole").tailoring.reason, "already picked");
+  assert.deepEqual(by("chole").options.map((o) => o.name), before.roles.find((r) => r.id === "chole").pick.options.map((o) => o.name));
+  assert.ok(by("chole").options.every((o) => o.taste === undefined));
+  assert.equal(by("cysto").tailoring.source, "kept");
   // kin: both options are the same entity (Kinetic Sand said two ways), nothing to rank, no credit spent.
   assert.equal(by("kin").tailoring.source, "editorial"); assert.equal(by("kin").tailoring.reason, "one entity");
   assert.ok(by("in").options.every((o) => o.wiki && o.connection), "every option still has a picture and a connection line");
   const calls = (await s("GET", "/api/diagnostics")).body.calls;
-  // 4 ranks (-in, chole, cysto x2) and a describe per pick whose ID the server did not already know (the entity map is shared by every learner).
+  // One rank (-in; kin has one entity, the picked cards are kept) and a describe per pick whose ID the server did not already know (the entity map is shared by every learner).
   const n = calls.find((c) => c.provider === "qloo-mock").n;
-  assert.ok(n >= 4 && n <= 6, `calls: ${n}`);
-  assert.ok((await s("GET", "/api/health")).body.taste.entities >= 8, "IDs learned from the rank answers (2 describes, 7 ranked names)");
+  assert.ok(n >= 1 && n <= 3, `calls: ${n}`);
+  assert.ok((await s("GET", "/api/health")).body.taste.entities >= 4, "IDs learned from the describes and the rank answer");
 
   // A pick from a ranked card is a hook from taste; the progress card says so.
   cues = await pick("in", "Penguin");

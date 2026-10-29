@@ -217,8 +217,11 @@ app.get("/api/terms/:id", wrap(async (req, res) => {
   if (!first) return res.json({ id: t.id, title: t.title, first_attempt: t.first_attempt, locked: true, pronunciation: t.pronunciation,
     pieces: (t.roles ?? []).filter((r) => r.part).map((r) => ({ part: r.part, say: r.say ?? null, ipa_syllables: r.ipa_syllables ?? null })) });
   // The pick cards are ranked for this learner's taste (taste.mjs): same options, the likeliest favorites first.
-  // Qloo spends credit, so like the other metered paths it waits for the passcode; a locked session sees the editorial order.
-  const shown = unlocked(req.sid) || isOwner(req) ? await tailorTerm(t, req.sid, (op, args) => runQloo(req.sid, op, args), { level: req.level }) : t;
+  // Cards already picked keep the order they were shown in; the lesson is reloaded after each pick, so the cards
+  // still ahead are ranked with that pick counted. Qloo spends credit, so like the other metered paths it waits
+  // for the passcode; a locked session sees the editorial order.
+  const picked = new Set(q.cuesFor.all(req.sid, t.id).filter((c) => c.source === "pick").map((c) => c.role));
+  const shown = unlocked(req.sid) || isOwner(req) ? await tailorTerm(t, req.sid, (op, args) => runQloo(req.sid, op, args), { level: req.level, skip: picked }) : t;
   res.json({ ...publicTerm(shown), locked: false, first_attempt_record: { ...first, pieces: first.pieces ? JSON.parse(first.pieces) : null } });
 }));
 

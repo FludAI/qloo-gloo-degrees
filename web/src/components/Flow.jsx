@@ -38,6 +38,7 @@ export default function Flow({ termId, glued, health, guard, credits, onCredits,
     if (prev) await api.removeCue(prev.id);
     // A card the agent proposed says so (via); the server looks the proposal up itself and keeps its verified ID.
     setChosen(await api.addCue({ term_id: term.id, recognized: true, role: role.id, label: o.name, connection: o.connection, source: "pick", qloo_entity_id: null, qloo_entity_type: o.qloo?.type ?? null, ...(o.via ? { via: o.via } : {}) }));
+    load(); // the cards still ahead come back ranked with this pick counted; picked cards keep their order
     onCredits?.(); // a first pick can complete a referred friend's first word
   };
   const close = () => { hush(); onClose(); };

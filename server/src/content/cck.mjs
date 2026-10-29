@@ -60,9 +60,9 @@ export const cck = {
       ] } },
     { id: "in", label: "-in ending", part: "-in", say: "in", ipa: "ɪn", ipa_syllables: ["ɪn"], meaning: "the substance ending", sound_like: "-in", target: "the ending sound “-in”", look_for: "something ending in “-in”",
       pick: { question: "Say the one that ends in “-in”.", options: [
+        { name: "LinkedIn", wiki: "LinkedIn", say: ["linkedin", "linked in"], qloo: { entity: "LinkedIn", type: "brand" }, image: "https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png", connection: "Linked-in supplies the ending sound -in of cholecystokin-in. It also links to kin. Ending sound only, not the definition." },
         { name: "Aspirin", wiki: "Aspirin", say: ["aspirin", "bayer"], qloo: { entity: "Bayer", type: "brand" }, connection: "Aspir-in supplies the ending sound -in of cholecystokin-in, and it is a substance too. Ending sound only, not the definition." },
         { name: "Aladdin", wiki: "Aladdin (1992 Disney film)", say: ["aladdin", "aladin"], qloo: { entity: "Aladdin", type: "movie" }, connection: "Aladd-in supplies the ending sound -in of cholecystokin-in. Ending sound only, not the definition." },
-        { name: "Tintin", wiki: "The Adventures of Tintin", say: ["tintin", "tin tin"], qloo: { entity: "The Adventures of Tintin", type: "book" }, connection: "Tint-in supplies the ending sound -in of cholecystokin-in. Ending sound only, not the definition." },
         { name: "Penguin", wiki: "Penguin Books", say: ["penguin", "penguin books"], qloo: { entity: "Penguin Books", type: "brand" }, connection: "Pengu-in supplies the ending sound -in of cholecystokin-in. Ending sound only, not the definition." },
       ] } },
   ],

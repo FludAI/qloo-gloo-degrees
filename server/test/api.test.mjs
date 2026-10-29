@@ -247,12 +247,12 @@ test("taste: two picks become Qloo signals and the next pick cards are ranked fo
 
   const after = (await s("GET", "/api/terms/cholecystokinin")).body;
   const by = (id) => after.roles.find((r) => r.id === id).pick;
-  // -in: the brand pair (Aspirin = Bayer, Penguin = Penguin Books) is ranked by the mock (reverse alphabetical), the film and the book follow in editorial order.
+  // -in: the three brands (LinkedIn, Aspirin = Bayer, Penguin = Penguin Books) are ranked by the mock (reverse alphabetical); the film follows in editorial order.
   assert.equal(by("in").tailoring.source, "taste");
-  assert.deepEqual(by("in").tailoring.ranked, ["Penguin", "Aspirin"]);
-  assert.deepEqual(by("in").options.map((o) => o.name), ["Penguin", "Aspirin", "Aladdin", "Tintin"]);
+  assert.deepEqual(by("in").tailoring.ranked, ["Penguin", "LinkedIn", "Aspirin"]);
+  assert.deepEqual(by("in").options.map((o) => o.name), ["Penguin", "LinkedIn", "Aspirin", "Aladdin"]);
   assert.ok(by("in").options[0].taste > by("in").options[1].taste);
-  assert.equal(by("in").options[2].taste, undefined);
+  assert.equal(by("in").options[3].taste, undefined);
   // chole and cysto are already picked: kept as shown, no call, so a card never moves under its reveal.
   assert.equal(by("chole").tailoring.source, "kept"); assert.equal(by("chole").tailoring.reason, "already picked");
   assert.deepEqual(by("chole").options.map((o) => o.name), before.roles.find((r) => r.id === "chole").pick.options.map((o) => o.name));

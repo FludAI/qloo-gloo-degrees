@@ -30,6 +30,7 @@ import { DOMAIN_TERMS } from "./resolve/domain-terms.mjs";
 import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, MIN_PICKS, RESERVE as TASTE_RESERVE } from "./taste.mjs";
 import * as credits from "./credits.mjs";
 import { levelFor, forceLevel, levelInfo, parseLevel } from "./level.mjs";
+import { qlooCards, CANDIDATES } from "./cards.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -409,14 +410,17 @@ app.post("/api/glue", wrap(async (req, res) => {
     if (!spent.ok) return res.status(402).json({ error: spent.message, code: "GLOO_EMPTY", balance: spent.balance, word: best.word });
     const id = `p-${randomBytes(5).toString("hex")}`;
     let packet;
+    // Degree 2: the drafter names more candidates per piece and Qloo keeps the ones it knows, pictures included (cards.mjs).
+    const built = req.level >= 2;
     if (agentMode() === "live") {
-      try { packet = await draftLesson(id, best.word); q.logCall.run(req.sid, "anthropic", "draft_lesson", "ok", null, null, Date.now()); }
+      try { packet = await draftLesson(id, best.word, { candidates: built ? CANDIDATES : 4 }); q.logCall.run(req.sid, "anthropic", "draft_lesson", "ok", null, null, Date.now()); }
       catch (e) { q.logCall.run(req.sid, "anthropic", "draft_lesson", "error", null, null, Date.now()); console.error("draft_lesson:", e.message);
         const back = credits.refundWord(req.sid, best.word);
         return res.status(502).json({ error: "Couldn't draft a lesson for that word right now. Your Gloo is back. Try again, or a reviewed lesson.", balance: back.balance }); }
     } else {
       packet = syntheticLesson(id, best.word);
     }
+    if (built) packet = await qlooCards(packet, (op, args) => runQloo(req.sid, op, args));
     q.addProvisional.run(id, req.sid, best.word, packet.origin, JSON.stringify(packet), Date.now());
     termId = id;
     created = true;

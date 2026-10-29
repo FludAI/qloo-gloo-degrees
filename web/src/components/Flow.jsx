@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import Practice from "./Practice.jsx";
 import SayIt from "./SayIt.jsx";
-import PickCard from "./PickCard.jsx";
+import PickCard, { artOf } from "./PickCard.jsx";
 import { PawRow, SpokenPaw, useHeardToes } from "./Paw.jsx";
 import { pawPlan } from "../lib/paw.js";
 import { speak, hush } from "../lib/speak.js";
@@ -160,7 +160,7 @@ function Together({ term, roles, chosen, onNext, onBack }) {
         <div className={`grid h-full gap-2 ${parts.length > 2 ? "grid-cols-2" : "grid-cols-1"}`}>
           {parts.map(({ role, pick, option }, i) => (
             <div key={role.id} className="slide-in relative overflow-hidden rounded-2xl border border-paper/20 bg-paper/10" style={{ animationDelay: `${200 + i * 40}ms` }}>
-              {option?.wiki ? <img src={`/api/art?t=${encodeURIComponent(option.wiki)}`} alt={pick.label} className="h-full w-full object-cover opacity-80" /> : null}
+              {artOf(option) ? <img src={artOf(option)} alt={pick.label} className="h-full w-full object-cover opacity-80" /> : null}
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/35 text-center">
                 <div className={`font-display text-3xl leading-none ${lit >= i ? "light-up" : "text-paper"}`}>{role.part}</div>
                 <div className="mt-1 text-sm font-medium">{role.meaning}</div>
@@ -215,7 +215,7 @@ function Skills({ progress, chosen, term, roles }) {
         <div className="mt-5 flex flex-wrap gap-2">
           {picks.map(({ c, option }) => (
             <span key={c.id} className="chip !py-1 !pl-1">
-              {option?.wiki ? <img src={`/api/art?t=${encodeURIComponent(option.wiki)}`} alt="" className="h-7 w-7 rounded-full object-cover" /> : <span className="h-7 w-7 rounded-full bg-paper/20" />}
+              {artOf(option) ? <img src={artOf(option)} alt="" className="h-7 w-7 rounded-full object-cover" /> : <span className="h-7 w-7 rounded-full bg-paper/20" />}
               <span className="font-mono text-gloo">{roleLabel[c.role] ?? c.role}</span><span className="font-medium">{c.label}</span>
             </span>
           ))}

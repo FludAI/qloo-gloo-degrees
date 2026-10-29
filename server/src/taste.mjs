@@ -14,7 +14,7 @@ export const MIN_PICKS = Number(process.env.TASTE_MIN_PICKS ?? 2);
 export const RESERVE = Number(process.env.TASTE_QLOO_RESERVE ?? 30); // ranking stops when fewer calls than this remain today
 const MAX_GROUPS = 2;
 const MAX_SIGNALS = 10;
-const TYPES = new Set(["artist", "book", "brand", "movie", "person", "place", "podcast", "tv_show", "videogame"]);
+export const TYPES = new Set(["artist", "book", "brand", "movie", "person", "place", "podcast", "tv_show", "videogame"]);
 const KEY = "qloo/entities.json";
 
 export const norm = (s) => String(s ?? "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
@@ -25,7 +25,7 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v =
 // answer) and kept in the media store, so a redeploy never spends them again. A name Qloo could not match
 // exactly (RC Cola is not in its brand graph) is remembered too, for a month, so it is never sent again. ----
 const UNRESOLVED_MS = 30 * 24 * 3600e3;
-let entities = null; // Map "type|name" -> { id, name, type, at } or { id: null, name, type, unresolved: at }
+let entities = null; // Map "type|name" -> { id, name, type, at, popularity?, image? } or { id: null, name, type, unresolved: at }
 let saving = null;
 
 export async function loadEntities() {
@@ -35,6 +35,7 @@ export async function loadEntities() {
   return entities;
 }
 export const entityIdFor = (name, type) => entities?.get(ek(name, type))?.id ?? null;
+export const entityFor = (name, type) => { const e = entities?.get(ek(name, type)); return e?.id ? e : null; };
 export const isUnresolved = (name, type) => { const u = entities?.get(ek(name, type))?.unresolved; return Boolean(u && Date.now() - u < UNRESOLVED_MS); };
 export const knownEntities = () => (entities ? [...entities.values()].filter((v) => v.id).length : 0);
 
@@ -45,15 +46,18 @@ const save = () => {
   });
   return saving;
 };
-export async function learnEntity(name, type, id) {
+// `extra` carries what a describe record also said (popularity, image), kept so a Qloo-built card never asks twice.
+export async function learnEntity(name, type, id, extra = {}) {
   if (!name || !type || !id) return;
   await loadEntities();
   const k = ek(name, type);
-  if (entities.get(k)?.id === String(id)) return;
-  entities.set(k, { id: String(id), name: String(name), type, at: Date.now() });
+  const prev = entities.get(k);
+  const more = Object.fromEntries(Object.entries(extra).filter(([, v]) => v != null));
+  if (prev?.id === String(id) && Object.keys(more).every((x) => prev[x] === more[x])) return;
+  entities.set(k, { ...(prev?.id === String(id) ? prev : {}), id: String(id), name: String(name), type, at: Date.now(), ...more });
   await save();
 }
-async function markUnresolved(name, type) {
+export async function markUnresolved(name, type) {
   await loadEntities();
   const k = ek(name, type);
   if (entities.get(k)?.id) return;
@@ -87,7 +91,7 @@ export async function resolveEntity(call, name, type, { budget = remaining } = {
   if (!["ok", "partial"].includes(env?.status)) return null;
   const hit = (env.results ?? []).find((r) => r && (r.entity_id || r.id));
   const id = hit ? String(hit.entity_id ?? hit.id) : null;
-  if (id) await learnEntity(name, type, id);
+  if (id) await learnEntity(name, type, id, { popularity: num(hit.popularity), image: typeof hit.properties?.image?.url === "string" ? hit.properties.image.url.slice(0, 300) : null });
   return id;
 }
 

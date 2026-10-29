@@ -68,11 +68,18 @@ before(async () => {
         return res.end(JSON.stringify(reply([{ type: "tool_use", id: "r1", name: "resolve_term", input: { term: "Breyers", reason: "brand name" } }])));
       }
       if (forcedTool === "draft_lesson") {
+        // Degree 2 asks for eight to twelve typed candidates per piece; the fake then names nine for "peri", one of them unknown to the mock graph.
+        const many = String(parsed.system).includes("8 to 12");
+        const tool = (parsed.tools ?? []).find((t) => t.name === "draft_lesson");
+        assert.equal(tool.input_schema.properties.roles.items.properties.pick.properties.options.maxItems, many ? 12 : 4);
+        const peri = many ? { pick: { question: "Say your favorite peri.", options: [
+          ["Peri-Peri Sauce", "brand"], ["Perrier", "brand"], ["Obscure Peri Band", "artist"], ["Periscope", "brand"], ["Perry Mason", "tv_show"], ["Katy Perry", "artist"], ["Peridot", "brand"], ["Perrier-Jouet", "brand"], ["Peri", "movie"],
+        ].map(([name, type]) => ({ name, wiki: name, type, connection: `${name} starts with the sound of peri (approximate).` })) } } : {};
         return res.end(JSON.stringify(reply([{ type: "tool_use", id: "d1", name: "draft_lesson", input: {
           title: "Peristalsis", pronunciation_approx: "pair-ih-STAL-sis", summary: "peri (around) + stalsis (contraction)",
           definition: "Wave-like muscle contractions that move food through the digestive tract.",
           components: [{ part: "peri", meaning: "around" }, { part: "stalsis", meaning: "contraction" }],
-          roles: [{ id: "peri", label: "peri = around", target: "around", look_for: "something that goes around" },
+          roles: [{ id: "peri", label: "peri = around", part: "peri", meaning: "around", sound_like: "perry", target: "around", look_for: "something that goes around", ...peri },
             { id: "stalsis", label: "stalsis = contraction", target: "squeeze", look_for: "something that squeezes" }],
           prompts: [{ skill: "meaning", type: "text", question: "What does peri mean?", accept_any: ["around", "surround"], answer: "Around." },
             { skill: "meaning", type: "text", question: "What does peristalsis do?", accept_all: [["move", "push", "propel"], ["food", "digest"]], answer: "Moves food along." },
@@ -485,6 +492,41 @@ test("degrees: a session draws a level, ?qloo=N forces and sticks, level 0 suppr
   assert.ok(t.rows.some((row) => row.level === 0 && row.level_forced === true));
   const tt = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
   assert.match(tt, /\blvl\b/); assert.match(tt, / 0! /);
+});
+
+test("degree 2: a new word's pick cards are built from Qloo: more candidates asked, the known and popular kept first, each with its Qloo record", async () => {
+  const s = session();
+  assert.equal((await s("GET", "/api/level?qloo=2")).body.level, 2);
+  const { body } = await s("POST", "/api/glue", { text: "peristalsis", mode: "typed" });
+  assert.equal(body.created, true);
+  await s("POST", `/api/terms/${body.term_id}/first-attempt`, { skipped: true });
+  const term = (await s("GET", `/api/terms/${body.term_id}`)).body;
+  assert.deepEqual(term.cards, { source: "qloo", describes: 9, skipped: 0, cap: 40, floor: 0.3 });
+  const role = term.roles.find((r) => r.id === "peri");
+  assert.equal(role.pick.built.source, "qloo"); assert.equal(role.pick.built.candidates, 9);
+  const kept = role.pick.options.filter((o) => o.qloo?.entity_id);
+  assert.ok(kept.length >= 4 && kept.length <= 8, `${kept.length} resolved`);
+  assert.ok(role.pick.options.length <= 8 && role.pick.options.length >= 4);
+  assert.ok(kept.every((o) => o.qloo.entity_id.startsWith("mock-") && o.qloo.popularity >= 0.3 && o.qloo.type && o.wiki));
+  for (let i = 1; i < kept.length; i++) assert.ok(kept[i - 1].qloo.popularity >= kept[i].qloo.popularity, "most popular first");
+  assert.ok(!role.pick.options.some((o) => o.name === "Obscure Peri Band" && o.qloo?.entity_id), "a name Qloo doesn't know carries no ID");
+  assert.equal(role.pick.options[0].image, null, "the mock graph has no pictures: wiki art is the fallback");
+  const other = term.roles.find((r) => r.id === "stalsis");
+  assert.equal(other.pick, undefined);
+  // Every describe went through the metered, cached runner: nine misses, no more on a second look at the word.
+  const calls = (await s("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider === "qloo-mock");
+  assert.deepEqual(calls, [{ provider: "qloo-mock", status: "empty", n: 1 }, { provider: "qloo-mock", status: "ok", n: 8 }]);
+  await s("GET", `/api/terms/${body.term_id}`);
+  assert.equal((await s("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider === "qloo-mock").reduce((n, c) => n + c.n, 0), 9);
+  // A degree-1 session drafting the same word gets four untyped options and no describe.
+  const s1 = session();
+  assert.equal((await s1("GET", "/api/level?qloo=1")).body.level, 1);
+  const one = (await s1("POST", "/api/glue", { text: "peristalsis", mode: "typed" })).body;
+  await s1("POST", `/api/terms/${one.term_id}/first-attempt`, { skipped: true });
+  const t1 = (await s1("GET", `/api/terms/${one.term_id}`)).body;
+  assert.equal(t1.cards, undefined);
+  assert.equal(t1.roles.find((r) => r.id === "peri").pick, undefined);
+  assert.equal((await s1("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider === "qloo-mock").length, 0);
 });
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {

@@ -24,8 +24,10 @@ export function mockQloo(op, args) {
   if (op === "describe") {
     const name = String(args.entity ?? "");
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    // A name containing "obscure" is unknown to the fixture (empty); the rest get a popularity from their length, no picture.
+    if (/obscure/i.test(name)) return base("describe", [], `Mock: nothing for "${name}"`);
     return base("describe", [{ entity_id: `mock-${slug}`, name, type: `urn:entity:${args.type ?? "brand"}`,
-      description: "Fixture record. Not Qloo data." }], `Mock: resolved "${name}"`);
+      popularity: Number((0.2 + (slug.length % 8) / 10).toFixed(2)), properties: { description: "Fixture record. Not Qloo data." } }], `Mock: resolved "${name}"`);
   }
   if (op === "recommend") {
     const t = args.target_type ?? "movie";

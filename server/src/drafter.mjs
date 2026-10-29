@@ -34,7 +34,9 @@ export async function resolveWithLlm(local) {
 }
 
 // ---- Provisional lesson drafting ----
-const LESSON_TOOL = {
+// The pick options Qloo can resolve: a public name with one of Qloo's entity types (cards.mjs builds degree-2 cards from them).
+export const ENTITY_TYPES = ["brand", "movie", "artist", "book", "tv_show", "person", "place", "podcast", "videogame"];
+const lessonTool = (maxOptions = 4) => ({
   name: "draft_lesson",
   description: "A provisional Gloo lesson. Accurate, concise, and honest about uncertainty.",
   input_schema: { type: "object", properties: {
@@ -56,12 +58,13 @@ const LESSON_TOOL = {
         say: { type: "string", description: "How to say the part, as a respelling a speech engine reads correctly, e.g. koh-lee" },
         ipa: { type: "string", description: "IPA for the part as it sounds inside the term (US English), no slashes, e.g. koʊli" },
         ipa_syllables: { type: "array", items: { type: "string" }, description: "The part's IPA split into syllables, one string per syllable, e.g. [\"koʊ\",\"li\"]" },
-        pick: { type: "object", description: "A favorite-pick: 3-4 well-known public names (brands, films, bands, books, teams) that ALL carry this part's sound or meaning, so any choice works as the cue",
+        pick: { type: "object", description: `A favorite-pick: ${maxOptions > 4 ? `${Math.max(3, maxOptions - 4)}-${maxOptions}` : "3-4"} well-known public names (brands, films, bands, books, teams) that ALL carry this part's sound or meaning, so any choice works as the cue`,
           properties: { question: { type: "string", description: "Short and spoken, e.g. Say your favorite cola." },
-            options: { type: "array", minItems: 3, maxItems: 4, items: { type: "object", properties: {
+            options: { type: "array", minItems: 3, maxItems: maxOptions, items: { type: "object", properties: {
               name: { type: "string" }, wiki: { type: "string", description: "Exact English Wikipedia article title for its picture" },
+              type: { type: "string", enum: ENTITY_TYPES, description: "What kind of public entity the name is" },
               connection: { type: "string", description: "One sentence: how this name carries the part. Say 'approximate' for sound links." } },
-              required: ["name", "wiki", "connection"] } } }, required: ["question", "options"] } },
+              required: ["name", "wiki", "type", "connection"] } } }, required: ["question", "options"] } },
         required: ["id", "label", "part", "meaning", "sound_like", "target", "look_for", "pick"] } },
     distinctions: { type: "array", maxItems: 4, items: { type: "string" }, description: "Easy confusions to keep straight" },
     prompts: { type: "array", minItems: 3, maxItems: 5, items: { type: "object", properties: {
@@ -78,7 +81,8 @@ const LESSON_TOOL = {
       required: ["skill", "type", "question", "answer"] } },
     sources: { type: "array", maxItems: 3, items: { type: "object", properties: { label: { type: "string" }, url: { type: "string" } }, required: ["label", "url"] } },
   }, required: ["title", "summary", "definition", "roles", "prompts"] },
-};
+});
+const LESSON_TOOL = lessonTool(4);
 
 const clip = (s, n) => String(s ?? "").slice(0, n);
 // IPA from the model: letters, IPA symbols, stress and length marks only; slashes and brackets dropped; null when empty.
@@ -95,13 +99,15 @@ export { compilePacket } from "./lessons.mjs";
 // opening line of the sample lessons; it is true of cholecystokinin and false of most words.
 export const TRUTH_RULE = `Truthfulness about word parts: claim that "the word already contains its meaning" (or that its parts carry its meaning) only when the term is built from real morphemes whose meanings you can name (chole = bile, cyst = sac, kin = movement). For an eponym, a loanword, a brand or a word whose pieces are only sounds, never make that claim: lead the summary with the sound hook (what the pieces sound like, so the learner can say it) and then state the meaning plainly. Sound cues are approximate memory aids, never etymology; say "approximate" for sound links.`;
 
-function shape(id, input, d, origin) {
+const typeOf = (t) => (ENTITY_TYPES.includes(t) ? t : null);
+function shape(id, input, d, origin, { maxOptions = 4 } = {}) {
   const components = arr(d.components).slice(0, 5).map((c) => ({ part: clip(c.part, 30), meaning: clip(c.meaning, 80), cue: c.cue ? clip(c.cue, 120) : "—" }));
   const roles = arr(d.roles).slice(0, 4).map((r) => ({
     id: slug(r.id), label: clip(r.label, 50), part: clip(r.part, 30) || clip(r.label, 30), meaning: clip(r.meaning, 60), sound_like: r.sound_like ? clip(r.sound_like, 30) : null,
     say: r.say ? clip(r.say, 40) : null, ipa: ipa(r.ipa), ipa_syllables: ipaSyllables(r.ipa_syllables, ipa(r.ipa)),
     target: clip(r.target, 80), look_for: clip(r.look_for, 120),
-    pick: arr(r.pick?.options).length ? { question: clip(r.pick.question, 80), options: arr(r.pick.options).slice(0, 4).map((o) => ({ name: clip(o.name, 40), wiki: o.wiki ? clip(o.wiki, 80) : null, say: [], qloo: null, connection: clip(o.connection, 160) })) } : undefined,
+    pick: arr(r.pick?.options).length ? { question: clip(r.pick.question, 80), options: arr(r.pick.options).slice(0, maxOptions).map((o) => ({ name: clip(o.name, 40), wiki: o.wiki ? clip(o.wiki, 80) : null, say: [],
+      qloo: typeOf(o.type) ? { entity: clip(o.name, 40), type: o.type } : null, connection: clip(o.connection, 160) })) } : undefined,
   }));
   const title = clip(d.title, 80) || input;
   const nodes = [["term", title, "term"]];
@@ -128,19 +134,21 @@ function shape(id, input, d, origin) {
   };
 }
 
-export async function draftLesson(id, word) {
+// `candidates` above four asks for that many pick options per piece (degree 2: Qloo keeps the ones it knows, cards.mjs).
+export async function draftLesson(id, word, { candidates = 4 } = {}) {
+  const n = Math.max(4, Math.min(12, Number(candidates) || 4));
   const d = await forced(
     `You draft provisional lessons for Gloo, which teaches hard terms by first using the meaning already inside them (roots, parts, origin), then linking parts to familiar cues.
 Be accurate. If the term has meaningful parts, list them. Sound cues are approximate memory aids, never etymology.
 ${TRUTH_RULE}
-Each role needs a favorite-pick: a question like "Which cola is yours?" and 3-4 well-known public names that all carry that part's sound or meaning, so whichever one the learner picks works as the cue.
+Each role needs a favorite-pick: a question like "Which cola is yours?" and ${n > 4 ? `${Math.max(3, n - 4)} to ${n}` : "3-4"} well-known public names that all carry that part's sound or meaning, so whichever one the learner picks works as the cue. Give each name its entity type (brand, movie, artist, book, tv_show, person, place, podcast, videogame).${n > 4 ? " Name many: the ones a culture graph knows best will be kept, so famous names beat clever ones." : ""}
 Practice prompts: short, answerable, deterministic. Text prompts need keyword rubrics (lowercase stems that a correct answer must contain). Number prompts need an exact expected value.
 Only cite sources you are confident exist (major dictionaries, NIH/NCBI, Wikipedia). It is fine to cite none.
 Every array field (components, roles, pick options, prompts, sources) must be a JSON array, never a string containing JSON.`,
     `Draft a provisional lesson for the term: "${word}"`,
-    LESSON_TOOL,
+    lessonTool(n),
   );
-  return shape(id, word, d, "ai-draft");
+  return shape(id, word, d, "ai-draft", { maxOptions: n });
 }
 
 export function syntheticLesson(id, word) {

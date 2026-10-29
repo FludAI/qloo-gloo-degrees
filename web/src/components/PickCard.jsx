@@ -58,13 +58,12 @@ export default function PickCard({ term, role, mine, health, guard, onPicked, on
   const onSaid = (transcript) => { const o = matchOption(transcript, role.pick.options); choose(o ? o.name : transcript.trim().replace(/^(my favorite( one)? is|it's|its|i like|i love)\s+/i, "").slice(0, 40), o); };
 
   if (reveal) {
-    const art = reveal.option?.image ?? (reveal.option?.wiki ? `/api/art?t=${encodeURIComponent(reveal.option.wiki)}` : null);
     const a = reveal.fresh; // animate only on a fresh pick, not when revisiting
     return (
       <section className="mt-3">
         <div className="stage">
           <div className="grid h-full grid-cols-2 gap-3">
-            <div className={a ? "rise" : ""}><Picture src={art} name={reveal.label} big custom={reveal.custom} whole={Boolean(reveal.option?.image)} /></div>
+            <div className={a ? "rise" : ""}><Picture src={artOf(reveal.option)} fallback={wikiArt(reveal.option)} name={reveal.label} big custom={reveal.custom} whole={Boolean(reveal.option?.link)} /></div>
             <div className="flex flex-col items-center justify-center text-center">
               <div className={`font-display text-[2.6rem] leading-none text-gloo ${a ? "rise" : ""}`} style={a ? { animationDelay: ".7s" } : undefined}>{role.part}</div>
               <SpokenPaw term={term} piece={role} size={40} className={`mt-1 ${a ? "fade-in" : ""}`} />
@@ -89,7 +88,7 @@ export default function PickCard({ term, role, mine, health, guard, onPicked, on
         <div className="grid h-full grid-cols-2 gap-3">
           {role.pick.options.slice(0, 4).map((o) => (
             <button key={o.name} ref={(n) => { tiles.current[o.name] = n; }} className={`tile-img ${picking && picking !== o.name ? "fall-back" : ""} ${o.taste != null ? "ring-1 ring-gloo/60" : ""}`} disabled={!!picking} onClick={() => choose(o.name, o)} aria-label={o.name} data-taste={o.taste ?? undefined}>
-              <Picture src={o.image ?? (o.wiki ? `/api/art?t=${encodeURIComponent(o.wiki)}` : null)} name={o.name} whole={Boolean(o.image)} />
+              <Picture src={artOf(o)} fallback={wikiArt(o)} name={o.name} whole={Boolean(o.link)} />
               <span className="tile-cap">{o.name}{o.link && <span className="ml-1 font-mono text-[9px] opacity-70">ad</span>}</span>
             </button>
           ))}
@@ -105,8 +104,12 @@ export default function PickCard({ term, role, mine, health, guard, onPicked, on
   );
 }
 
-function Picture({ src, name, big = false, custom = false, whole = false }) {
-  const [failed, setFailed] = useState(false);
+// A tile's picture: the option's own (a Qloo record's, or an affiliate packshot), else the Wikipedia lead image.
+// When the first fails to load, the second is tried before the name alone.
+export const wikiArt = (o) => (o?.wiki ? `/api/art?t=${encodeURIComponent(o.wiki)}` : null);
+export const artOf = (o) => o?.image ?? wikiArt(o);
+function Picture({ src, fallback = null, name, big = false, custom = false, whole = false }) {
+  const [failed, setFailed] = useState(0);
   if (custom) {
     // An off-list favorite: a waveform tile for what they said.
     return (
@@ -116,10 +119,11 @@ function Picture({ src, name, big = false, custom = false, whole = false }) {
       </div>
     );
   }
-  if (!src || failed) {
+  const use = failed === 0 ? src : failed === 1 && fallback && fallback !== src ? fallback : null;
+  if (!use) {
     return <div className={`flex h-full w-full items-center justify-center rounded-2xl bg-paper/10 px-2 text-center ${big ? "font-display text-3xl" : "text-base font-medium"}`}>{name}</div>;
   }
   // A product shot (an affiliate picture on white) is shown whole on a white tile, so its label is never cropped
-  // and two packshots line up; wiki art fills the tile.
-  return <img src={src} alt={name} className={`h-full w-full rounded-2xl ${whole ? "bg-white object-contain p-1" : "object-cover"}`} loading="lazy" onError={() => setFailed(true)} />;
+  // and two packshots line up; wiki and Qloo art fill the tile.
+  return <img key={use} src={use} alt={name} className={`h-full w-full rounded-2xl ${whole ? "bg-white object-contain p-1" : "object-cover"}`} loading="lazy" onError={() => setFailed((n) => n + 1)} />;
 }

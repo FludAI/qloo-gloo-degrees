@@ -30,11 +30,15 @@ done
 
 ## Deploy (from the repo root)
 
+This repository is the degrees deployment (`qloo.gloo.news`): the same app as `gloo.news`, with the
+degree of Qloo drawn per session (`server/src/level.mjs`). It shares production's secrets and media
+bucket, and `MEDIA_PREFIX=degrees/` keeps every object it writes apart from production's.
+
 ```bash
-gcloud run deploy qloo-gloo --source . --region $REGION \
+gcloud run deploy qloo-gloo-degrees --source . --region $REGION \
   --allow-unauthenticated \
   --set-secrets QLOO_API_KEY=qloo-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_TOKEN=gloo-admin-token:latest \
-  --update-env-vars CREDITS_WELCOME=5,PUBLIC_URL=https://gloo.news \
+  --update-env-vars CREDITS_WELCOME=20,PUBLIC_URL=https://qloo.gloo.news,MEDIA_PREFIX=degrees/ \
   --min-instances 1 --max-instances 1 --session-affinity \
   --memory 1Gi --cpu 1 --timeout 120
 ```
@@ -153,6 +157,12 @@ Environment variables (defaults shown):
 | `CREDITS_SAME_IP_MINUTES` | `60` | A claim from the referrer's own address within this window is held, not paid |
 | `CREDITS_SECRET` | `ADMIN_TOKEN` | Keys referral codes and the address hash; set it if the owner token ever rotates |
 | `PUBLIC_URL` | request origin | Base of the referral link (`https://gloo.news`) |
+| `MEDIA_PREFIX` | unset | Put in front of every media key (`degrees/`), so two deployments share one bucket without touching each other's clips, art, lessons or Qloo caches |
+| `QLOO_LEVELS` | `0,1,2,3` | The degrees of Qloo a new session may draw (0 editorial, 1 rerank, 2 Qloo cards, 3 agent doorway); `?qloo=N` on any URL forces one for that session; `GET /api/level` reads it; `GET /api/admin/degrees?hours=&format=text` splits outcomes by degree |
+| `QLOO_POP_FLOOR` | `0.3` | Degree 2: a drafted pick candidate below this Qloo popularity is dropped |
+| `QLOO_DESCRIBE_PER_WORD` | `40` | Degree 2: describe calls per drafted word, at most (every resolved entity is cached for ever) |
+| `QLOO_CARD_CANDIDATES` / `QLOO_CARD_KEEP` | `12` / `8` | Degree 2: candidates asked of the drafter per piece, and options kept per card (the card shows four) |
+| `QLOO_TAGS_PER_REQUEST` | `10` | `entity_tags` calls one owner look at `/api/admin/learners/:sid/graph` may spend on entities not yet tagged |
 
 Set a budget alert on the Anthropic account too. Qloo hackathon keys expire
 after the event; after that the demo shows "Qloo: key missing" and keeps the

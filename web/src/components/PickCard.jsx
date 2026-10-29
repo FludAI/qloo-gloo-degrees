@@ -47,7 +47,7 @@ export default function PickCard({ term, role, mine, health, guard, degree = nul
     setPicking(label);
     if (option) flashRing(tiles.current[option.name]);
     sfx("lock");
-    await onPicked(role, { name: label, connection, qloo: option?.qloo ?? null });
+    await onPicked(role, { name: label, connection, qloo: option?.qloo ?? null, ...(option?.via ? { via: option.via } : {}) });
     await new Promise((r) => setTimeout(r, option ? 640 : 200)); // others fall back, then the reveal
     setPicking(null);
     setReveal({ label, option, custom: !option, fresh: true });
@@ -143,7 +143,7 @@ function AgentCards({ agent, picking, onChoose, onRetry }) {
       {agent.calls?.length > 0 && (
         <details className="mt-2 text-xs text-paper/60">
           <summary className="cursor-pointer text-center">Every Qloo call behind this</summary>
-          <div className="mt-2 text-ink"><Provenance log={agent.calls} /></div>
+          <div className="mt-2"><Provenance log={agent.calls} /></div>
         </details>
       )}
     </div>

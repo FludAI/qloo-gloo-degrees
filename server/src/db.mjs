@@ -56,11 +56,23 @@ if (!db.prepare("PRAGMA table_info(first_attempts)").all().some((c) => c.name ==
   }
 }
 
+// Degrees of Qloo (level.mjs): how much Qloo shapes this learner's lessons, drawn once per session or forced
+// with ?qloo=N; and on each offered card, how long the server took to build it.
+{
+  const cols = db.prepare("PRAGMA table_info(learners)").all().map((c) => c.name);
+  for (const [col, type] of [["qloo_level", "INTEGER"], ["qloo_forced", "INTEGER NOT NULL DEFAULT 0"], ["qloo_level_at", "INTEGER"]]) {
+    if (!cols.includes(col)) db.exec(`ALTER TABLE learners ADD COLUMN ${col} ${type}`);
+  }
+  if (!db.prepare("PRAGMA table_info(pick_offers)").all().some((c) => c.name === "build_ms")) db.exec("ALTER TABLE pick_offers ADD COLUMN build_ms REAL");
+}
+
 export const q = {
   addBeacon: db.prepare("INSERT INTO beacons (sid, event, data, created_at) VALUES (?, ?, ?, ?)"),
   ensureLearner: db.prepare("INSERT OR IGNORE INTO learners (sid, created_at) VALUES (?, ?)"),
   isUnlocked: db.prepare("SELECT unlocked FROM learners WHERE sid = ?"),
   unlock: db.prepare("UPDATE learners SET unlocked = 1 WHERE sid = ?"),
+  getLevel: db.prepare("SELECT qloo_level, qloo_forced, qloo_level_at FROM learners WHERE sid = ?"),
+  setLevel: db.prepare("UPDATE learners SET qloo_level = ?, qloo_forced = ?, qloo_level_at = ? WHERE sid = ?"),
   getFirst: db.prepare("SELECT * FROM first_attempts WHERE sid = ? AND term_id = ?"),
   putFirst: db.prepare("INSERT OR IGNORE INTO first_attempts (sid, term_id, response, skipped, content_version, created_at, pieces) VALUES (?, ?, ?, ?, ?, ?, ?)"),
   attemptByKey: db.prepare("SELECT * FROM attempts WHERE sid = ? AND idem_key = ?"),
@@ -85,7 +97,7 @@ export const q = {
   pickSignals: db.prepare(`SELECT qloo_entity_id, qloo_entity, qloo_type, MAX(created_at) AS at FROM learner_cues
     WHERE sid = ? AND removed_at IS NULL AND source = 'pick' AND (qloo_entity_id IS NOT NULL OR qloo_entity IS NOT NULL)
     GROUP BY COALESCE(qloo_entity_id, qloo_entity) ORDER BY at DESC LIMIT 10`),
-  putOffer: db.prepare("INSERT OR REPLACE INTO pick_offers (sid, term_id, role, tailored, options, signals, at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+  putOffer: db.prepare("INSERT OR REPLACE INTO pick_offers (sid, term_id, role, tailored, options, signals, at, build_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
   getOffer: db.prepare("SELECT tailored, options, signals, at FROM pick_offers WHERE sid = ? AND term_id = ? AND role = ?"),
   hooksFor: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND term_id = ? AND removed_at IS NULL AND source = 'pick' GROUP BY hook_source"),
   hooksAll: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick' GROUP BY hook_source"),

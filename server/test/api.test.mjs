@@ -92,7 +92,7 @@ before(async () => {
   proc = spawn(process.execPath, [SERVER, "--mock"], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: ":memory:", ANTHROPIC_API_KEY: "test-not-a-key", ANTHROPIC_BASE_URL: "http://localhost:8798",
       TTS_ENDPOINT: "http://localhost:8798/tts", MEDIA_LOCAL: "1", MEDIA_DIR: mkdtempSync(join(tmpdir(), "gloo-api-media-")), LIMIT_TTS_PER_SESSION_HOUR: "2",
-      ADMIN_TOKEN: "test-owner-token" },
+      ADMIN_TOKEN: "test-owner-token", QLOO_LEVELS: "1" }, // every session draws degree 1 (production's behavior); the degrees test forces others
     stdio: "ignore",
   });
   // A cold start on Windows can take several seconds; wait up to 30 s.
@@ -444,6 +444,48 @@ const owner = (token = "test-owner-token") => async (method, path, body, extra =
   });
   return { status: res.status, body: await res.json() };
 };
+
+// ---- Degrees of Qloo ----
+test("degrees: a session draws a level, ?qloo=N forces and sticks, level 0 suppresses ranking, and the report splits by level", async () => {
+  const s = session();
+  const drawn = (await s("GET", "/api/level")).body;
+  assert.ok([0, 1, 2, 3].includes(drawn.level)); assert.equal(drawn.forced, false); assert.equal(drawn.degrees[drawn.level], drawn.degree);
+  assert.equal((await s("GET", "/api/level")).body.level, drawn.level);
+  // The switch rides on any request of the session, the page's own URL (/?qloo=0) included; here the API's.
+  const forced = (await s("GET", "/api/level?qloo=0")).body;
+  assert.deepEqual([forced.level, forced.forced, forced.degree], [0, true, "editorial"]);
+  assert.equal((await s("GET", "/api/level?qloo=9")).body.level, 0, "a bad value changes nothing");
+  assert.equal((await s("GET", "/api/level")).body.level, 0, "sticky");
+  // At level 0 the cards are editorial for the reason 'level 0', and a pick resolves no entity (no describe).
+  await s("POST", "/api/terms/cholecystokinin/first-attempt", { skipped: true });
+  const term = (await s("GET", "/api/terms/cholecystokinin")).body;
+  assert.ok(term.roles.filter((r) => r.pick).every((r) => r.pick.tailoring.reason === "level 0"));
+  const o = term.roles.find((r) => r.id === "chole").pick.options[0];
+  const cues = (await s("POST", "/api/learner/cues", { term_id: "cholecystokinin", role: "chole", label: o.name, connection: o.connection, source: "pick", recognized: true, qloo_entity_type: o.qloo?.type })).body;
+  assert.equal(cues[0].hook_source, "editorial"); assert.equal(cues[0].shown_rank, 0);
+  assert.equal((await s("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider.startsWith("qloo")).length, 0);
+  // Another session forced to 1 sees the ranking reasons production gives.
+  const s1 = session();
+  assert.equal((await s1("GET", "/api/level?qloo=1")).body.level, 1);
+  await s1("POST", "/api/terms/cholecystokinin/first-attempt", { skipped: true });
+  assert.equal((await s1("GET", "/api/terms/cholecystokinin")).body.roles.find((r) => r.id === "chole").pick.tailoring.reason, "fewer than two picks");
+  // The report: per level, sessions, cards, first-tile picks, pictures, skips, practice, calls, latency; text too.
+  assert.equal((await fetch(`http://localhost:${PORT}/api/admin/degrees`)).status, 401);
+  const r = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  assert.equal(r.levels.length, 4);
+  const zero = r.levels.find((l) => l.level === 0);
+  assert.ok(zero.sessions >= 1); assert.ok(zero.forced >= 1); assert.ok(zero.cards >= 4); assert.ok(zero.picks >= 1); assert.ok(zero.first_tile_picks >= 1);
+  assert.ok(zero.skipped_cards >= 3); assert.equal(zero.qloo_calls, 0); assert.equal(typeof zero.median_build_ms, "number"); assert.equal(typeof zero.median_pick_ms, "number");
+  assert.ok(zero.rates.first_tile > 0 && zero.rates.skip > 0); assert.ok(zero.tiles >= zero.cards * 2 && zero.tiles <= zero.cards * 4);
+  assert.deepEqual(Object.keys(zero.rates), ["first_tile", "picture", "skip", "practice_correct", "independent", "recall_sessions", "taste_picks"]);
+  const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
+  assert.match(text, /^sessions since /); assert.match(text, /\n0 +editorial /); assert.match(text, /\n3 +agent doorway /);
+  // The testers report carries the level of each session.
+  const t = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  assert.ok(t.rows.some((row) => row.level === 0 && row.level_forced === true));
+  const tt = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
+  assert.match(tt, /\blvl\b/); assert.match(tt, / 0! /);
+});
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {
   assert.equal((await owner("")("GET", "/api/admin/lessons")).status, 401);

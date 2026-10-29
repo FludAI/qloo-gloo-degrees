@@ -5,7 +5,7 @@
 const STAGES = ["visited", "gate", "read", "lesson", "pick", "practice", "correct"];
 
 export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
-  const learners = db.prepare("SELECT sid, created_at FROM learners WHERE created_at >= ? ORDER BY created_at").all(since);
+  const learners = db.prepare("SELECT sid, created_at, qloo_level, qloo_forced FROM learners WHERE created_at >= ? ORDER BY created_at").all(since);
   const beacons = db.prepare("SELECT event, data, created_at FROM beacons WHERE sid = ? ORDER BY created_at");
   const calls = db.prepare("SELECT provider, op, status, cache, created_at FROM provider_calls WHERE sid = ? ORDER BY created_at");
   const firsts = db.prepare("SELECT term_id, skipped, created_at FROM first_attempts WHERE sid = ?");
@@ -14,7 +14,7 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   const drafts = db.prepare("SELECT word, created_at FROM provisional_terms WHERE sid = ?");
   const resolutions = db.prepare("SELECT mode, decision, created_at FROM resolutions WHERE sid = ?");
 
-  const sessions = learners.map(({ sid, created_at }) => {
+  const sessions = learners.map(({ sid, created_at, qloo_level, qloo_forced }) => {
     const b = beacons.all(sid).map((r) => ({ event: r.event, at: r.created_at, ...safeJson(r.data) }));
     const c = calls.all(sid), f = firsts.all(sid), cu = cues.all(sid), a = attempts.all(sid), d = drafts.all(sid), r = resolutions.all(sid);
     const gates = b.filter((x) => x.event === "gate"), mics = b.filter((x) => x.event === "mic");
@@ -30,7 +30,7 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
     const stage = correct ? "correct" : a.length ? "practice" : picks.length ? "pick" : f.length ? "lesson" : readOk || r.some((x) => x.term_id || x.decision) ? "read" : live ? "gate" : "visited";
     const lastSeen = Math.max(created_at, ...b.map((x) => x.at), ...c.map((x) => x.created_at), ...f.map((x) => x.created_at), ...cu.map((x) => x.created_at), ...a.map((x) => x.created_at));
     return {
-      sid: sid.slice(0, 8), started_at: created_at, last_seen: lastSeen, stage,
+      sid: sid.slice(0, 8), started_at: created_at, last_seen: lastSeen, stage, level: qloo_level ?? null, level_forced: Boolean(qloo_forced),
       gate: last ? { state: last.state ?? null, source: last.source ?? null, error: last.error ?? null, in_app: last.in_app ?? null, platform: last.platform ?? null, slow: Boolean(last.slow) } : null,
       mic: mic ? { state: mic.state ?? null, error: mic.error ?? null } : null,
       reads: { tried: reads.length, ok: readOk }, captures,
@@ -50,8 +50,8 @@ export function testersText(report) {
   const t = (ms) => new Date(ms).toISOString().slice(5, 16).replace("T", " ");
   const lines = [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}`,
     "funnel: " + STAGES.map((s) => `${s} ${report.funnel[s]}`).join(" > "), ""];
-  const head = ["sid", "started", "stage", "gate", "src", "where", "mic", "reads", "lessons", "picks", "voice", "practice", "drafted", "errors"];
-  const rows = report.rows.map((r) => [r.sid, t(r.started_at), r.stage,
+  const head = ["sid", "started", "lvl", "stage", "gate", "src", "where", "mic", "reads", "lessons", "picks", "voice", "practice", "drafted", "errors"];
+  const rows = report.rows.map((r) => [r.sid, t(r.started_at), r.level == null ? "-" : `${r.level}${r.level_forced ? "!" : ""}`, r.stage,
     r.gate ? `${r.gate.state}${r.gate.slow ? "+slow" : ""}${r.gate.error ? ` ${r.gate.error}` : ""}` : "-", r.gate?.source ?? "-",
     r.gate ? `${r.gate.platform ?? "?"}${r.gate.in_app ? ` in ${r.gate.in_app}` : ""}` : "-",
     r.mic ? `${r.mic.state}${r.mic.error ? ` ${r.mic.error}` : ""}` : "-",

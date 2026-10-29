@@ -52,9 +52,15 @@ async function gcsBackend(bucketName, timeoutMs) {
   };
 }
 
-// opts: { bucket, dir, forceLocal, probeTimeoutMs }. The backend is chosen once, on first use.
+// opts: { bucket, dir, forceLocal, probeTimeoutMs, prefix }. The backend is chosen once, on first use.
+// `prefix` goes in front of every key in the backend ("degrees/" makes "audio/x.mp3" live at "degrees/audio/x.mp3"),
+// so a second deployment can share a bucket with production and never read or write its objects.
+const PREFIX = /^(?:[a-z0-9][a-z0-9_.-]*\/)*$/;
 export function createStore(opts = {}) {
   const dir = opts.dir ?? resolve(here, "../data/media");
+  const prefix = String(opts.prefix ?? "");
+  if (!PREFIX.test(prefix)) throw new Error(`bad media prefix: ${prefix} (lowercase segments ending in /)`);
+  const at = (key) => prefix + key;
   const lru = new Lru(opts.lru);
   const missing = new Set(); // keys known not to exist, so a miss doesn't hit the bucket twice
   let backend = null;
@@ -70,23 +76,24 @@ export function createStore(opts = {}) {
   const check = (key) => { if (!KEY.test(key)) throw new Error(`bad media key: ${key}`); return key; };
   const store = {
     mode: async () => (await ready()).mode,
+    prefix,
     async get(key) {
       check(key);
       const hit = lru.get(key);
       if (hit !== undefined) return hit;
       if (missing.has(key)) return null;
-      const bytes = await (await ready()).get(key);
+      const bytes = await (await ready()).get(at(key));
       if (bytes) lru.set(key, bytes); else missing.add(key);
       return bytes;
     },
     async put(key, bytes, contentType = "application/octet-stream") {
       check(key);
       const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
-      await (await ready()).put(key, buf, contentType);
+      await (await ready()).put(at(key), buf, contentType);
       missing.delete(key);
       lru.set(key, buf);
     },
-    async del(key) { check(key); await (await ready()).del(key); lru.delete(key); missing.add(key); },
+    async del(key) { check(key); await (await ready()).del(at(key)); lru.delete(key); missing.add(key); },
     async getJson(key) { const b = await store.get(key); if (!b) return null; try { return JSON.parse(b.toString("utf8")); } catch { return null; } },
     putJson: (key, value) => store.put(key, Buffer.from(JSON.stringify(value)), "application/json"),
     forget: () => { lru.clear(); missing.clear(); },
@@ -94,11 +101,13 @@ export function createStore(opts = {}) {
   return store;
 }
 
-// The app's store: MEDIA_BUCKET (default gloo-media-bondswipe), MEDIA_LOCAL=1 forces the folder, MEDIA_DIR moves it.
+// The app's store: MEDIA_BUCKET (default gloo-media-bondswipe), MEDIA_LOCAL=1 forces the folder, MEDIA_DIR moves it,
+// MEDIA_PREFIX ("degrees/") keeps a second deployment's objects apart from production's in the same bucket.
 export const media = createStore({
   bucket: process.env.MEDIA_BUCKET ?? "gloo-media-bondswipe",
   dir: process.env.MEDIA_DIR,
   forceLocal: process.env.MEDIA_LOCAL === "1",
+  prefix: process.env.MEDIA_PREFIX ?? "",
 });
 
 export const sha256 = (s) => createHash("sha256").update(String(s)).digest("hex");

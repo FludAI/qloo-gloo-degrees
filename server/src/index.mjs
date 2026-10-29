@@ -11,6 +11,7 @@ import { mockQloo } from "./mock.mjs";
 import { take } from "./limits.mjs";
 import { db, q, exportLearner, deleteLearner } from "./db.mjs";
 import { testersReport, testersText } from "./testers.mjs";
+import { degreesReport, degreesText } from "./degrees.mjs";
 import { assess, promptHints, bestHeard } from "./assess.mjs";
 import { deriveSkill, POLICY } from "./scheduler.mjs";
 import { listTerms, getTerm, findPrompt, publicTerm, publicPrompt, addTerms, reload as reloadContent, store as lessons } from "./content/index.mjs";
@@ -28,6 +29,7 @@ import { scorePieces, termPieces } from "./resolve/pieces.mjs";
 import { DOMAIN_TERMS } from "./resolve/domain-terms.mjs";
 import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, MIN_PICKS, RESERVE as TASTE_RESERVE } from "./taste.mjs";
 import * as credits from "./credits.mjs";
+import { levelFor, forceLevel, levelInfo, parseLevel } from "./level.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -92,6 +94,10 @@ app.use((req, res, next) => {
   // First contact: the welcome Gloo (once per session for ever; the ledger survives "delete my data").
   if (q.ensureLearner.run(sid, Date.now()).changes === 1) credits.welcome(sid);
   req.sid = sid;
+  // The degree of Qloo for this session (level.mjs): drawn at random on first contact, or forced by ?qloo=N on any
+  // request (the page's own URL included), after which it sticks.
+  const forced = parseLevel(Array.isArray(req.query.qloo) ? req.query.qloo[0] : req.query.qloo);
+  req.level = forced != null ? forceLevel(sid, forced) : levelFor(sid);
   next();
 });
 // Behind Cloud Run's proxy the client address is the first forwarded hop. Only ever hashed with a secret, for the referral soft signal.
@@ -162,6 +168,9 @@ app.post("/api/referrals/claim", (req, res) => {
   res.json(credits.claim({ code, sid: req.sid, ip: clientIp(req) }));
 });
 
+// This session's degree of Qloo. The only place the learner app can read it (the info sheet shows "degree N").
+app.get("/api/level", (req, res) => res.json(levelInfo(req.sid)));
+
 app.post("/api/unlock", (req, res) => {
   if (!PASSCODE) return res.json({ unlocked: true });
   const given = String(req.body?.code ?? "").trim();
@@ -199,7 +208,7 @@ app.get("/api/terms/:id", wrap(async (req, res) => {
     pieces: (t.roles ?? []).filter((r) => r.part).map((r) => ({ part: r.part, say: r.say ?? null, ipa_syllables: r.ipa_syllables ?? null })) });
   // The pick cards are ranked for this learner's taste (taste.mjs): same options, the likeliest favorites first.
   // Qloo spends credit, so like the other metered paths it waits for the passcode; a locked session sees the editorial order.
-  const shown = unlocked(req.sid) || isOwner(req) ? await tailorTerm(t, req.sid, (op, args) => runQloo(req.sid, op, args)) : t;
+  const shown = unlocked(req.sid) || isOwner(req) ? await tailorTerm(t, req.sid, (op, args) => runQloo(req.sid, op, args), { level: req.level }) : t;
   res.json({ ...publicTerm(shown), locked: false, first_attempt_record: { ...first, pieces: first.pieces ? JSON.parse(first.pieces) : null } });
 }));
 
@@ -441,8 +450,8 @@ app.post("/api/learner/cues", wrap(async (req, res) => {
     const { option, hook_source, shown_rank } = hookSourceFor(req.sid, t, b.role, label);
     hook = hook_source; rank = shown_rank;
     entityName = option?.qloo?.entity ?? null; entityType = option?.qloo?.type ?? null;
-    // Resolving spends a credit, so a locked session only gets an ID the server already knows.
-    const live = unlocked(req.sid) || isOwner(req);
+    // Resolving spends a credit, so a locked session, or one at degree 0 (no describe), only gets an ID the server already knows.
+    const live = (unlocked(req.sid) || isOwner(req)) && req.level !== 0;
     entityId = entityName ? await resolveEntity((op, args) => runQloo(req.sid, op, args), entityName, entityType, live ? {} : { budget: () => 0 }) : null;
   }
   q.addCue.run(req.sid, t.id, b.role, label, connection, source, entityId, entityType, 1, Date.now(), entityName, hook, rank);
@@ -602,6 +611,14 @@ app.get("/api/admin/testers", admin, (req, res) => {
   const hours = Math.min(24 * 30, Math.max(0.1, Number(req.query.hours ?? 48) || 48));
   const report = testersReport(db, { since: Date.now() - hours * 3600e3 });
   if (req.query.format === "text") return res.type("text/plain").send(testersText(report));
+  res.json(report);
+});
+
+// The degrees report: the same window, split by degree of Qloo: cards, picks, pictures, practice, recall, calls, latency.
+app.get("/api/admin/degrees", admin, (req, res) => {
+  const hours = Math.min(24 * 30, Math.max(0.1, Number(req.query.hours ?? 48) || 48));
+  const report = degreesReport(db, { since: Date.now() - hours * 3600e3 });
+  if (req.query.format === "text") return res.type("text/plain").send(degreesText(report));
   res.json(report);
 });
 

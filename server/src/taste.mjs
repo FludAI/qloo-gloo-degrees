@@ -105,9 +105,11 @@ export function signalsFor(sid) {
 // ---- Tailoring ----
 // One role's pick card, with its options reordered for the signals. `call(op, args)` is the guarded, cached,
 // metered Qloo call (index.mjs runQloo bound to the session). Never throws: any trouble leaves the editorial order.
-export async function tailorRole(role, signals, call, { budget = remaining, groups = MAX_GROUPS } = {}) {
+// `level` is the session's degree of Qloo (level.mjs): under 1, ranking is suppressed and the reason says so.
+export async function tailorRole(role, signals, call, { budget = remaining, groups = MAX_GROUPS, level = null } = {}) {
   const options = role.pick?.options ?? [];
   const editorial = (reason) => ({ ...role, pick: { ...role.pick, options: options.map((o) => ({ ...o })), tailoring: { source: "editorial", reason } } });
+  if (level != null && level < 1) return editorial("level 0");
   if (signals.length < MIN_PICKS) return editorial("fewer than two picks");
   if (options.length < 2) return editorial("one option");
   await loadEntities();
@@ -181,15 +183,19 @@ export async function tailorRole(role, signals, call, { budget = remaining, grou
 
 // The whole term as this learner should see it, and a record of what each card offered (so a later pick can say
 // whether it came from a tailored card: index.mjs reads pick_offers when the cue is saved).
+// Each offer also records where every tile's picture comes from (qloo, wiki, none) and the build time, for the degrees report.
+export const picOf = (o) => (o.image ? "qloo" : o.wiki ? "wiki" : null);
 export async function tailorTerm(term, sid, call, opts = {}) {
   const signals = opts.signals ?? signalsFor(sid);
   const roles = [];
   for (const role of term.roles ?? []) {
     if (!role.pick?.options?.length) { roles.push(role); continue; }
+    const t0 = performance.now();
     const t = await tailorRole(role, signals, call, opts);
     roles.push(t);
     q.putOffer.run(sid, term.id, role.id, t.pick.tailoring.source === "taste" ? 1 : 0,
-      JSON.stringify(t.pick.options.map((o) => ({ name: o.name, taste: o.taste ?? null }))), JSON.stringify(signals), Date.now());
+      JSON.stringify(t.pick.options.map((o) => ({ name: o.name, taste: o.taste ?? null, pic: picOf(o), wiki: o.wiki ?? null }))), JSON.stringify(signals), Date.now(),
+      Math.round(performance.now() - t0));
   }
   return { ...term, roles };
 }

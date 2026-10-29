@@ -163,9 +163,9 @@ Environment variables (defaults shown):
 | `QLOO_DESCRIBE_PER_WORD` | `40` | Degree 2: describe calls per drafted word, at most (every resolved entity is cached for ever) |
 | `QLOO_CARD_CANDIDATES` / `QLOO_CARD_KEEP` | `12` / `8` | Degree 2: candidates asked of the drafter per piece, and options kept per card (the card shows four) |
 | `QLOO_TAGS_PER_REQUEST` | `10` | `entity_tags` calls one owner look at `/api/admin/learners/:sid/graph` may spend on entities not yet tagged |
-| `META_API_KEY` | unset | Meta Model API key (secret `meta-api-key`), the second model backend (`server/src/providers.mjs`): Muse Spark through the API's Anthropic-Messages-compatible protocol at `https://api.meta.ai`. Unset = the meta arm reports unavailable and falls back to Claude, recorded on the call's row |
+| `META_API_KEY` | unset | Meta Model API key (secret `meta-api-key`), the second model backend (`server/src/providers.mjs`): Muse Spark through the API's chat-completions surface (`POST https://api.meta.ai/v1/chat/completions`). Unset = the muse arm reports unavailable and falls back to Claude, recorded on the call's row |
 | `META_MODEL` / `META_BASE_URL` | `muse-spark-1.3` / `https://api.meta.ai` | The Meta model (multimodal, tool calling) and where to reach it |
-| `MODEL_ARMS` | the keyed providers | Which model arms a new session may draw (`anthropic,meta`); `?model=meta` on any URL forces one for that session; `GET /api/level` reads it under `model`; the degrees report splits every outcome by arm |
+| `MODEL_ARMS` | the keyed providers | Which model arms a new session may draw (`anthropic,muse`); `?model=muse` on any URL forces one for that session; `GET /api/level` reads it under `model`; the degrees report splits every outcome by arm |
 
 Set a budget alert on the Anthropic account too. Qloo hackathon keys expire
 after the event; after that the demo shows "Qloo: key missing" and keeps the

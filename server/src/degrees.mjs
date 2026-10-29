@@ -4,7 +4,7 @@
 // (learner_cues), practice (attempts), provider calls. Sessions are cookies, not people.
 const LEVELS = [0, 1, 2, 3];
 const NAMES = { 0: "editorial", 1: "rerank", 2: "qloo cards", 3: "agent doorway" };
-const ARMS = ["anthropic", "meta"];
+const ARMS = ["anthropic", "muse"];
 const MODEL_OPS = ["read_word", "resolve_term", "draft_lesson", "cue_agent"];
 
 const median = (xs) => { const a = xs.filter((x) => Number.isFinite(x)).sort((x, y) => x - y); if (!a.length) return null; const m = a.length >> 1; return Math.round(a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2); };

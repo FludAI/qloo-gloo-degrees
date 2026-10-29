@@ -32,7 +32,7 @@ export function levelFor(sid, opts) {
   return row.qloo_level ?? assignLevel(sid, opts);
 }
 // ---- The model arm: which model provider answers this session's tasks (providers.mjs). Drawn once from
-// MODEL_ARMS, or from the providers that have a key; ?model=meta|anthropic forces it and it sticks. ----
+// MODEL_ARMS, or from the providers that have a key; ?model=muse|anthropic forces it and it sticks. ----
 export const ARMS = PROVIDERS;
 export const parseArm = (v) => (ARMS.includes(String(v ?? "")) ? String(v) : null);
 export function armPool() {

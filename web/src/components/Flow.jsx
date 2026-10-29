@@ -15,7 +15,7 @@ import { InviteButton } from "./Invite.jsx";
 const HOW = { typed: "typed", voice: "heard", ocr: "read from a photo", camera: "read from the camera" };
 const bareTitle = (term) => term.title.replace(/\s*\(.*?\)\s*/g, "").trim();
 
-export default function Flow({ termId, glued, health, guard, credits, onCredits, say, onClose, onRegue }) {
+export default function Flow({ termId, glued, health, guard, credits, onCredits, say, degree = null, onClose, onRegue }) {
   const [term, setTerm] = useState(null);
   const [progress, setProgress] = useState(null);
   const [chosen, setChosen] = useState([]);
@@ -36,7 +36,8 @@ export default function Flow({ termId, glued, health, guard, credits, onCredits,
   const onPicked = async (role, o) => {
     const prev = pickFor(role.id);
     if (prev) await api.removeCue(prev.id);
-    setChosen(await api.addCue({ term_id: term.id, recognized: true, role: role.id, label: o.name, connection: o.connection, source: "pick", qloo_entity_id: null, qloo_entity_type: o.qloo?.type ?? null }));
+    // A card the agent proposed says so (via); the server looks the proposal up itself and keeps its verified ID.
+    setChosen(await api.addCue({ term_id: term.id, recognized: true, role: role.id, label: o.name, connection: o.connection, source: "pick", qloo_entity_id: null, qloo_entity_type: o.qloo?.type ?? null, ...(o.via ? { via: o.via } : {}) }));
     onCredits?.(); // a first pick can complete a referred friend's first word
   };
   const close = () => { hush(); onClose(); };
@@ -62,7 +63,7 @@ export default function Flow({ termId, glued, health, guard, credits, onCredits,
           <Dots steps={steps} at={step} onPick={setStep} />
           {current.startsWith("pick:") && (() => {
             const role = pickRoles.find((r) => `pick:${r.id}` === current);
-            return <PickCard key={role.id} term={term} role={role} mine={pickFor(role.id)} health={health} guard={guard} onPicked={onPicked} onNext={next} onBack={back} />;
+            return <PickCard key={role.id} term={term} role={role} mine={pickFor(role.id)} health={health} guard={guard} degree={degree} onPicked={onPicked} onNext={next} onBack={back} />;
           })()}
           {current === "together" && <Together term={term} roles={pickRoles} chosen={chosen} onNext={next} onBack={back} />}
           {current === "practice" && (<>

@@ -87,7 +87,8 @@ before(async () => {
           sources: [{ label: "bad", url: "javascript:alert(1)" }] } }])));
       }
       calls++;
-      const msg = calls === 1
+      // The first step of every agent run resolves Breyers; the next one proposes.
+      const msg = (parsed.messages ?? []).length === 1
         ? reply([{ type: "tool_use", id: "t1", name: "qloo_describe", input: { entity: "Breyers", type: "brand" } }])
         : reply([{ type: "tool_use", id: "t2", name: "propose_cues", input: { cues: [
             { role: "sound", label: "Breyers", qloo_entity_id: "mock-breyers", qloo_entity_type: "brand", connection_type: "approximate sound", connection: "Breyers ≈ Brier", grounding: "resolved" },
@@ -148,6 +149,8 @@ test("a spoken first attempt is scored against the pieces in the background", as
 test("agent: Qloo-returned IDs are kept, invented IDs are stripped, unknown roles dropped", async () => {
   const s = session();
   await s("POST", "/api/terms/brier-score/first-attempt", { response: "forecast accuracy" });
+  assert.equal((await s("POST", "/api/cues/agent", { term_id: "brier-score", familiar: ["Breyers"] })).status, 403, "the agent is degree 3");
+  await s("GET", "/api/level?qloo=3");
   const { body } = await s("POST", "/api/cues/agent", { term_id: "brier-score", familiar: ["Breyers"] });
   assert.equal(body.status, "ok");
   assert.equal(body.cues.length, 2);
@@ -238,7 +241,7 @@ test("taste: two picks become Qloo signals and the next pick cards are ranked fo
   assert.equal(inCue.qloo_entity_id, "mock-penguin-books", "resolved from the rank answer, no describe needed");
   const hooks = (await s("GET", "/api/progress/cholecystokinin")).body.hooks;
   assert.equal(hooks.line, "1 of your 3 hooks came from your taste.");
-  assert.deepEqual(hooks.term, { total: 3, taste: 1, editorial: 2, own: 0 });
+  assert.deepEqual(hooks.term, { total: 3, taste: 1, editorial: 2, own: 0, agent: 0 });
   assert.equal(hooks.signals, 3);
   // An off-list favorite is the learner's own.
   const own = (await s("POST", "/api/learner/cues", { term_id: "cholecystokinin", role: "kin", label: "Ky Jelly", connection: "my own", source: "pick", recognized: true })).body;
@@ -527,6 +530,67 @@ test("degree 2: a new word's pick cards are built from Qloo: more candidates ask
   assert.equal(t1.cards, undefined);
   assert.equal(t1.roles.find((r) => r.id === "peri").pick, undefined);
   assert.equal((await s1("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider === "qloo-mock").length, 0);
+});
+
+test("degree 3: the doorway fills familiar from the learner's picks, focuses the card's piece, and a proposed card picked becomes an agent hook with its verified ID", async () => {
+  const s = session();
+  await s("POST", "/api/terms/brier-score/first-attempt", { skipped: true });
+  assert.equal((await s("GET", "/api/level?qloo=3")).body.level, 3);
+  // Nothing picked yet: a sentence, no model call.
+  const none = await s("POST", "/api/cues/agent", { term_id: "brier-score", role: "sound" });
+  assert.equal(none.status, 400); assert.equal(none.body.status, "unavailable"); assert.match(none.body.reason, /Pick a favorite/);
+  // Two picks on another lesson are what the learner knows.
+  await s("POST", "/api/terms/cholecystokinin/first-attempt", { skipped: true });
+  const cck = (await s("GET", "/api/terms/cholecystokinin")).body;
+  for (const [roleId, name] of [["chole", "Pepsi-Cola"], ["cysto", "Twisted Sister"]]) {
+    const o = cck.roles.find((r) => r.id === roleId).pick.options.find((x) => x.name === name);
+    await s("POST", "/api/learner/cues", { term_id: "cholecystokinin", role: roleId, label: o.name, connection: o.connection, source: "pick", recognized: true, qloo_entity_type: o.qloo?.type });
+  }
+  const { status, body } = await s("POST", "/api/cues/agent", { term_id: "brier-score", role: "sound" });
+  assert.equal(status, 200); assert.equal(body.status, "ok");
+  assert.deepEqual(body.familiar, ["Twisted Sister", "Pepsi"], "the packet's entity names, newest first");
+  assert.equal(body.cues[0].label, "Breyers"); assert.equal(body.cues[0].qloo_entity_id, "mock-breyers");
+  assert.ok(body.calls.length >= 1);
+  // Picking the proposed card: the server keeps the ID it verified, whatever the browser sends, and counts an agent hook.
+  const list = (await s("POST", "/api/learner/cues", { term_id: "brier-score", role: "sound", label: "breyers", connection: body.cues[0].connection, source: "pick", recognized: true, via: "agent", qloo_entity_id: "forged", qloo_entity_type: "book" })).body;
+  assert.equal(list[0].hook_source, "agent"); assert.equal(list[0].qloo_entity_id, "mock-breyers"); assert.equal(list[0].qloo_type, "brand"); assert.equal(list[0].shown_rank, null);
+  const progress = (await s("GET", "/api/progress/brier-score")).body;
+  assert.equal(progress.hooks.term.agent, 1);
+  const r = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  const three = r.levels.find((l) => l.level === 3);
+  assert.ok(three.agent_calls >= 1 && three.agent_picks >= 1);
+  // A session at degree 1 cannot open the doorway even with names.
+  const s1 = session();
+  await s1("GET", "/api/level?qloo=1");
+  await s1("POST", "/api/terms/brier-score/first-attempt", { skipped: true });
+  const shut = await s1("POST", "/api/cues/agent", { term_id: "brier-score", familiar: ["Breyers"] });
+  assert.equal(shut.status, 403); assert.equal(shut.body.status, "unavailable"); assert.match(shut.body.reason, /degree 3/);
+});
+
+test("learner graph: words, picks, hooks and outcomes become nodes in order; the owner reads the graph with its embedding; export and delete carry it", async () => {
+  const s = session();
+  await s("GET", "/api/level?qloo=1");
+  await s("POST", "/api/terms/cholecystokinin/first-attempt", { response: "koh lee sis toe KY nin" });
+  const cck = (await s("GET", "/api/terms/cholecystokinin")).body;
+  const o = cck.roles.find((r) => r.id === "chole").pick.options.find((x) => x.name === "Pepsi-Cola");
+  await s("POST", "/api/learner/cues", { term_id: "cholecystokinin", role: "chole", label: o.name, connection: o.connection, source: "pick", recognized: true, qloo_entity_type: o.qloo?.type });
+  await s("POST", "/api/attempts", { prompt_id: "cck-chole", response: "bile", idempotency_key: "graph-attempt-1" });
+  const nodes = (await s("GET", "/api/export")).body.learner_nodes;
+  const sid = nodes[0]?.sid;
+  assert.match(sid ?? "", /^[a-f0-9]{32}$/, "the export carries the nodes with their sid");
+  assert.deepEqual(nodes.map((n) => n.kind), ["word", "pick", "hook", "outcome"]);
+  assert.equal(nodes[1].key, "mock-pepsi"); assert.equal(JSON.parse(nodes[2].data).sound_like, "cola");
+  assert.equal((await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/graph`)).status, 401);
+  assert.equal((await fetch(`http://localhost:${PORT}/api/admin/learners/${"0".repeat(32)}/graph`, { headers: { "x-gloo-admin": "test-owner-token" } })).status, 404);
+  const g = await (await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/graph`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  assert.equal(g.nodes.length, 4); assert.equal(g.nodes[0].kind, "word"); assert.equal(g.nodes[0].key, "cholecystokinin");
+  assert.equal(g.entities, 1); assert.equal(g.learner.qloo_level, 1);
+  assert.equal(g.embedding.nodes, 4); assert.ok(g.embedding.vector["urn:gloo:word:cholecystokinin"] > 0);
+  assert.deepEqual(g.trajectory.map((t) => t.drift), [0]);
+  assert.equal(g.calls.calls, 1, "one entity_tags call, through the owner's own runner");
+  // Deleting the learner's data removes the graph too.
+  await s("DELETE", "/api/learner");
+  assert.equal((await s("GET", "/api/export")).body.learner_nodes.length, 0);
 });
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {

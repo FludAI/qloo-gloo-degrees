@@ -106,6 +106,17 @@ export function signalsFor(sid) {
   return out;
 }
 
+// The same taste as names the agent can look up ("Pepsi", "Twisted Sister"), newest first, six at most.
+export function familiarFor(sid) {
+  const out = [];
+  for (const r of q.pickNames.all(sid)) {
+    const name = String(r.qloo_entity ?? r.label ?? "").trim();
+    if (name && !out.some((x) => norm(x) === norm(name))) out.push(name);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
 // ---- Tailoring ----
 // One role's pick card, with its options reordered for the signals. `call(op, args)` is the guarded, cached,
 // metered Qloo call (index.mjs runQloo bound to the session). Never throws: any trouble leaves the editorial order.
@@ -220,7 +231,7 @@ export function hookSourceFor(sid, term, roleId, label) {
 // The progress line: "3 of your 4 hooks came from your taste."
 export function hooksSummary(sid, termId) {
   const count = (rows) => {
-    const c = { total: 0, taste: 0, editorial: 0, own: 0 };
+    const c = { total: 0, taste: 0, editorial: 0, own: 0, agent: 0 };
     for (const r of rows) { c.total += r.n; if (r.hook_source in c) c[r.hook_source] += r.n; else c.editorial += r.n; }
     return c;
   };

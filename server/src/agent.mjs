@@ -99,7 +99,8 @@ function validate(term, proposal, seenIds) {
 }
 
 // run(op, args) -> Qloo envelope (already guarded, cached and logged by the caller)
-export async function runCueAgent({ term, familiar, run }) {
+// `focus` names the role the learner is on ("None of these" on that card): the agent fills it first.
+export async function runCueAgent({ term, familiar, run, focus = null }) {
   if (agentMode() !== "live") return { status: "unavailable", reason: "ANTHROPIC_API_KEY is not configured on the server.", cues: [], trace: [] };
 
   const client = new Anthropic();
@@ -108,7 +109,7 @@ export async function runCueAgent({ term, familiar, run }) {
   const seenIds = new Set();
   const usage = { input_tokens: 0, output_tokens: 0 };
   const messages = [{ role: "user", content:
-    `Things I already know and like: ${familiar.map((f) => `"${f}"`).join(", ")}.\nFind up to 3 cues that help me learn ${term.title}.` }];
+    `Things I already know and like: ${familiar.map((f) => `"${f}"`).join(", ")}.\nFind up to 3 cues that help me learn ${term.title}.${focus ? ` I am on the piece "${focus}": fill that role first.` : ""}` }];
 
   for (let step = 0; step < MAX_STEPS; step++) {
     // Current models reject forced tool choice; at the step limit the model is told to finish instead.

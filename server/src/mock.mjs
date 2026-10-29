@@ -56,5 +56,12 @@ export function mockQloo(op, args) {
       affinity: Number((0.95 - i * 0.1).toFixed(2)), explanation: "Fixture: ranked against the signals.",
     })), `Mock: ${options.length} ${t} options ranked for ${(args.signals ?? []).length} signals`);
   }
+  if (op === "entity_tags") {
+    // Two fixture tags per entity, named after it, so a learner's tag bag has something to hold.
+    const ids = (args.entities ?? []).map(String).slice(0, 5);
+    return base("entity_tags", ids.flatMap((id) => { const slug = id.replace(/^mock-/, "").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+      return [{ id: `urn:tag:keyword:media:${slug}`, name: slug, type: "urn:tag:keyword:media", affinity: 1 }, { id: "urn:tag:genre:media:fixture", name: "Fixture", type: "urn:tag:genre:media", affinity: 0.5 }]; }).slice(0, args.limit ?? 10),
+      `Mock: tags for ${ids.length} entities`);
+  }
   return base(op, [], `Mock: no fixture for ${op}`);
 }

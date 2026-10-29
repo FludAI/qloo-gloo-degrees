@@ -42,6 +42,7 @@ if (process.env.SMOKE_QLOO === "1") {
   console.log(`qloo describe(Breyers) -> ${describe.envelope?.status ?? describe.error}:`, describe.envelope?.error ? `${describe.envelope.error.code}: ${describe.envelope.summary}` : (describe.items ?? []).slice(0, 3).map((i) => `${i.name} [${i.id}]`));
   ok(describe.envelope && describe.envelope.status !== "error", "Qloo describe reachable");
 
+  await call("GET", "/api/level?qloo=3"); // the agent is degree 3 of Qloo
   const agent = (await call("POST", "/api/cues/agent", { term_id: "brier-score", familiar: ["Breyers", "Moneyball"] })).body;
   console.log(`agent -> ${agent.status ?? agent.error}${agent.model ? ` (${agent.model})` : ""}`);
   for (const s of agent.trace ?? []) console.log(`   ${s.tool} ${JSON.stringify(s.args)} -> ${s.status} · ${s.result_count}`);

@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS pick_offers (
   sid TEXT NOT NULL, term_id TEXT NOT NULL, role TEXT NOT NULL, tailored INTEGER NOT NULL, options TEXT NOT NULL, signals TEXT NOT NULL, at INTEGER NOT NULL,
   PRIMARY KEY (sid, term_id, role));
 CREATE TABLE IF NOT EXISTS beacons (id INTEGER PRIMARY KEY, sid TEXT NOT NULL, event TEXT NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS learner_nodes (
+  id INTEGER PRIMARY KEY, sid TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, label TEXT, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS learner_nodes_sid ON learner_nodes (sid, created_at);
+CREATE TABLE IF NOT EXISTS learner_embeddings (
+  id INTEGER PRIMARY KEY, sid TEXT NOT NULL, nodes INTEGER NOT NULL, dims INTEGER NOT NULL, vector TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS provider_calls (
   id INTEGER PRIMARY KEY, sid TEXT, provider TEXT NOT NULL, op TEXT NOT NULL, status TEXT NOT NULL, cache TEXT, duration_ms REAL, created_at INTEGER NOT NULL);
 `);
@@ -94,6 +99,8 @@ export const q = {
   addCue: db.prepare(`INSERT INTO learner_cues (sid, term_id, role, label, connection, source, qloo_entity_id, qloo_type, recognized, created_at, qloo_entity, hook_source, shown_rank)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   // Taste signals: the distinct public entities behind this learner's favorite picks, newest first (ID when known, else the packet's name).
+  // What the learner said they like, as names, newest first: the packet's entity when the pick was on the card, else their own word.
+  pickNames: db.prepare("SELECT label, qloo_entity FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick' ORDER BY created_at DESC LIMIT 20"),
   pickSignals: db.prepare(`SELECT qloo_entity_id, qloo_entity, qloo_type, MAX(created_at) AS at FROM learner_cues
     WHERE sid = ? AND removed_at IS NULL AND source = 'pick' AND (qloo_entity_id IS NOT NULL OR qloo_entity IS NOT NULL)
     GROUP BY COALESCE(qloo_entity_id, qloo_entity) ORDER BY at DESC LIMIT 10`),
@@ -110,13 +117,14 @@ export const q = {
 export function exportLearner(sid) {
   const all = (t) => db.prepare(`SELECT * FROM ${t} WHERE sid = ?`).all(sid);
   return { first_attempts: all("first_attempts"), attempts: all("attempts"), learner_cues: all("learner_cues"),
-    provisional_terms: all("provisional_terms"), resolutions: all("resolutions"), provider_calls: all("provider_calls"), pick_offers: all("pick_offers") };
+    provisional_terms: all("provisional_terms"), resolutions: all("resolutions"), provider_calls: all("provider_calls"), pick_offers: all("pick_offers"),
+    learner_nodes: all("learner_nodes"), learner_embeddings: all("learner_embeddings") };
 }
 
 export function deleteLearner(sid) {
   db.exec("BEGIN");
   try {
-    for (const t of ["first_attempts", "attempts", "hint_exposures", "learner_cues", "provisional_terms", "resolutions", "provider_calls", "pick_offers", "learners"]) {
+    for (const t of ["first_attempts", "attempts", "hint_exposures", "learner_cues", "provisional_terms", "resolutions", "provider_calls", "pick_offers", "learner_nodes", "learner_embeddings", "learners"]) {
       db.prepare(`DELETE FROM ${t} WHERE sid = ?`).run(sid);
     }
     db.exec("COMMIT");

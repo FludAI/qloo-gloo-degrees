@@ -21,7 +21,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   const pictured = (o) => o.pic === "qloo" || (o.pic === "wiki" && Boolean(artOk?.get(String(o.wiki ?? "").trim().slice(0, 120))?.mime));
 
   const blank = (level) => ({ level, degree: level == null ? "unassigned" : NAMES[level], sessions: 0, forced: 0,
-    cards: 0, tailored_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, skipped_cards: 0,
+    cards: 0, tailored_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0,
     answers: 0, correct: 0, independent: 0, recall_sessions: 0, drafted_words: 0,
     qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, build_ms: [], pick_ms: [] });
   const by = new Map(LEVELS.map((l) => [l, blank(l)]));
@@ -41,7 +41,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
       if (!pick) g.skipped_cards++;
       else if (pick.created_at >= card.at) g.pick_ms.push(pick.created_at - card.at);
     }
-    for (const x of p) { g.picks++; if (x.shown_rank === 0) g.first_tile_picks++; if (x.hook_source === "taste") g.taste_picks++; if (x.hook_source === "own") g.own_picks++; }
+    for (const x of p) { g.picks++; if (x.shown_rank === 0) g.first_tile_picks++; if (x.hook_source === "taste") g.taste_picks++; if (x.hook_source === "own") g.own_picks++; if (x.hook_source === "agent") g.agent_picks++; }
     let recall = false;
     for (const x of a) { g.answers++; if (x.outcome === "correct") { g.correct++; if (x.independent) { g.independent++; recall = true; } } }
     if (recall) g.recall_sessions++;
@@ -65,10 +65,10 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
 export function degreesText(report) {
   const pct = (x) => (x == null ? "-" : `${Math.round(x * 100)}%`);
   const ms = (x) => (x == null ? "-" : `${x}ms`);
-  const head = ["level", "degree", "sessions", "cards", "tailored", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "drafts", "build", "to-pick"];
+  const head = ["level", "degree", "sessions", "cards", "tailored", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"];
   const rows = report.levels.map((g) => [g.level ?? "?", g.degree, `${g.sessions}${g.forced ? ` (${g.forced} forced)` : ""}`, String(g.cards), String(g.tailored_cards),
     pct(g.rates.first_tile), pct(g.rates.picture), pct(g.rates.skip), `${g.correct}/${g.answers}`, `${g.independent} (${g.recall_sessions} sess)`, String(g.own_picks),
-    String(g.qloo_calls), String(g.qloo_cache_hits), String(g.agent_calls), String(g.drafted_words), ms(g.median_build_ms), ms(g.median_pick_ms)]);
+    String(g.qloo_calls), String(g.qloo_cache_hits), String(g.agent_calls), String(g.agent_picks), String(g.drafted_words), ms(g.median_build_ms), ms(g.median_pick_ms)]);
   const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => String(r[i]).length)));
   const fmt = (r) => r.map((c, i) => String(c).padEnd(widths[i])).join("  ");
   return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}`, "",

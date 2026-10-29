@@ -4,6 +4,8 @@ import { speak, hush } from "../lib/speak.js";
 import { sfx } from "../lib/sfx.js";
 import { flashRing } from "./Motion.jsx";
 import { SpokenPaw } from "./Paw.jsx";
+import Provenance from "./Provenance.jsx";
+import { api } from "../api.js";
 
 // One sound piece, one square of four pictures, one spoken line. The learner says their favorite
 // (any answer counts, listed or not). Lock-in: the pick flashes a ring and snaps to its slot; then
@@ -26,9 +28,10 @@ export function matchOption(transcript, options) {
   return score >= 0.72 ? best : null;
 }
 
-export default function PickCard({ term, role, mine, health, guard, onPicked, onNext, onBack }) {
+export default function PickCard({ term, role, mine, health, guard, degree = null, onPicked, onNext, onBack }) {
   const [reveal, setReveal] = useState(mine ? { label: mine.label, option: role.pick.options.find((o) => o.name === mine.label) ?? null, custom: !role.pick.options.some((o) => o.name === mine.label), fresh: false } : null);
   const [picking, setPicking] = useState(null); // name of the tile locking in
+  const [agent, setAgent] = useState(null); // the doorway (degree 3): null, { busy } or the agent's answer
   const spoken = useRef("");
   const tiles = useRef({});
 
@@ -56,6 +59,13 @@ export default function PickCard({ term, role, mine, health, guard, onPicked, on
   });
 
   const onSaid = (transcript) => { const o = matchOption(transcript, role.pick.options); choose(o ? o.name : transcript.trim().replace(/^(my favorite( one)? is|it's|its|i like|i love)\s+/i, "").slice(0, 40), o); };
+
+  // "None of these": the cue agent looks for more, starting from this learner's own picks (the server fills them in).
+  const askAgent = () => guard(async () => {
+    hush(); setAgent({ busy: true });
+    try { setAgent(await api.agent(term.id, null, role.id)); }
+    catch (e) { setAgent({ status: "error", reason: e?.message ?? "The agent didn't answer." }); }
+  });
 
   if (reveal) {
     const a = reveal.fresh; // animate only on a fresh pick, not when revisiting
@@ -100,7 +110,43 @@ export default function PickCard({ term, role, mine, health, guard, onPicked, on
         <SayIt health={health} guard={guard} onText={onSaid} />
         <button className="btn-ghost" onClick={onNext}>Skip</button>
       </div>
+      {degree >= 3 && !agent && <button className="mt-2 w-full text-center text-sm text-paper/60 underline" disabled={!!picking} onClick={askAgent}>None of these</button>}
+      {agent && <AgentCards agent={agent} picking={picking} onChoose={(c) => choose(c.label, { name: c.label, connection: c.connection, wiki: null, image: null, qloo: c.qloo_entity_type ? { entity: c.label, type: c.qloo_entity_type } : null, via: "agent" })} onRetry={askAgent} />}
     </section>
+  );
+}
+
+// The agent's answer under the card: its proposals as cards, labeled for what they are, one sentence for every
+// other state, and every Qloo call it made folded beneath.
+function AgentCards({ agent, picking, onChoose, onRetry }) {
+  if (agent.busy) return <p className="mt-3 text-center text-sm text-paper/60">Asking the agent, starting from your picks…</p>;
+  const line = agent.status === "limited" ? (agent.reason ?? "The agent has had its turns for now.")
+    : agent.status === "unavailable" ? (agent.reason ?? "The agent isn't available here.")
+    : agent.status === "error" ? (agent.reason ?? "The agent didn't answer.")
+    : agent.status === "partial" ? "The agent ran out of steps before it could propose anything."
+    : !agent.cues?.length ? "The agent found nothing that fits this piece. Say your own favorite." : null;
+  return (
+    <div className="mt-3">
+      {line && <p className="text-center text-sm text-paper/70">{line}{agent.status === "error" && <> <button className="underline" onClick={onRetry}>Try again</button></>}</p>}
+      {agent.cues?.length > 0 && (<>
+        <p className="text-center text-xs text-paper/50">Proposed by the agent, not reviewed</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {agent.cues.map((c) => (
+            <button key={`${c.role}-${c.label}`} className="rounded-2xl border border-paper/25 bg-paper/5 px-3 py-3 text-left" disabled={!!picking} onClick={() => onChoose(c)} aria-label={c.label}>
+              <div className="font-medium">{c.label}</div>
+              <div className="mt-1 text-[11px] leading-snug text-paper/60">{c.connection}</div>
+              <div className="mt-1 font-mono text-[9px] text-paper/40">{c.source}</div>
+            </button>
+          ))}
+        </div>
+      </>)}
+      {agent.calls?.length > 0 && (
+        <details className="mt-2 text-xs text-paper/60">
+          <summary className="cursor-pointer text-center">Every Qloo call behind this</summary>
+          <div className="mt-2 text-ink"><Provenance log={agent.calls} /></div>
+        </details>
+      )}
+    </div>
   );
 }
 

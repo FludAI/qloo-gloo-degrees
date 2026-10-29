@@ -27,7 +27,8 @@ import { ttsMode, speaker, VOICE } from "./tts.mjs";
 import { media } from "./media.mjs";
 import { scorePieces, termPieces } from "./resolve/pieces.mjs";
 import { DOMAIN_TERMS } from "./resolve/domain-terms.mjs";
-import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, MIN_PICKS, RESERVE as TASTE_RESERVE } from "./taste.mjs";
+import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, familiarFor, MIN_PICKS, RESERVE as TASTE_RESERVE } from "./taste.mjs";
+import { record as recordNode, learnerGraph } from "./graph.mjs";
 import * as credits from "./credits.mjs";
 import { levelFor, forceLevel, levelInfo, parseLevel } from "./level.mjs";
 import { qlooCards, CANDIDATES } from "./cards.mjs";
@@ -221,7 +222,9 @@ app.post("/api/terms/:id/first-attempt", (req, res) => {
   if (!skipped && !response.trim()) return res.status(400).json({ error: "response or skipped is required" });
   // Background signal: which sound pieces the attempt carried. Stored, not shown yet.
   const pieces = skipped ? null : scorePieces(termPieces(t), response);
-  q.putFirst.run(req.sid, t.id, response, skipped ? 1 : 0, String(t.version), Date.now(), pieces ? JSON.stringify(pieces) : null);
+  if (q.putFirst.run(req.sid, t.id, response, skipped ? 1 : 0, String(t.version), Date.now(), pieces ? JSON.stringify(pieces) : null).changes) {
+    recordNode(req.sid, "word", t.id, t.title, { provisional: Boolean(t.provisional), skipped, said: pieces?.said_count ?? null, pieces: pieces?.pieces?.length ?? null });
+  }
   credits.activate(req.sid); // a referred learner's first word experience may be complete now
   res.json({ saved: true, pieces });
 });
@@ -280,10 +283,15 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
   const t = termFor(req.sid, req.body?.term_id);
   if (!t) return res.status(404).json({ error: "unknown term" });
   if (!q.getFirst.get(req.sid, t.id)) return res.status(409).json({ error: "save the first attempt first" });
-  const familiar = (req.body?.familiar ?? []).map((f) => String(f).trim().slice(0, 60)).filter(Boolean).slice(0, 6);
-  if (!familiar.length) return res.status(400).json({ error: "name at least one thing you know" });
+  // No typing anywhere: when the request names nothing, the learner's own picks are what they know (names, newest first).
+  const familiar = ((req.body?.familiar ?? []).map((f) => String(f).trim().slice(0, 60)).filter(Boolean).slice(0, 6));
+  if (!familiar.length) familiar.push(...familiarFor(req.sid));
+  if (!familiar.length) return res.status(400).json({ status: "unavailable", reason: "Pick a favorite on one card first; the agent starts from your picks.", cues: [], trace: [], calls: [] });
   const pii = findPersonalData(familiar);
   if (pii) return res.status(400).json({ error: `That looks like a ${pii}. Name public things you know, like brands, films or books.` });
+  // The agent is degree 3 of Qloo (level.mjs); below it the doorway stays shut, so the degrees compare cleanly.
+  if (req.level != null && req.level < 3 && !isOwner(req)) return res.status(403).json({ status: "unavailable", reason: "The agent opens at degree 3 of Qloo; this session is at a lower degree.", cues: [], trace: [], calls: [] });
+  const focus = t.roles.some((r) => r.id === req.body?.role) ? String(req.body.role) : null;
   const log = [];
   const run = async (op, args) => {
     const envelope = await runQloo(req.sid, op, args);
@@ -295,7 +303,7 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
     const lim = take("agent", req.sid);
     if (!lim.ok) return res.status(429).json({ status: "limited", reason: lim.reason, cues: [], trace: [], calls: [] });
     try {
-      result = await runCueAgent({ term: t, familiar, run });
+      result = await runCueAgent({ term: t, familiar, run, focus });
       q.logCall.run(req.sid, "anthropic", "cue_agent", result.status, null, null, Date.now());
     } catch (e) {
       q.logCall.run(req.sid, "anthropic", "cue_agent", "error", null, null, Date.now());
@@ -306,8 +314,13 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
   } else {
     result = { status: "unavailable", reason: "The agent isn't configured on this server. Use the reviewed cues below.", cues: [], trace: [] };
   }
-  res.json({ ...result, calls: log });
+  // What the agent proposed is remembered for this session, so a pick of one of its cards carries the verified ID
+  // (the browser's copy is not trusted) and is counted as an agent hook.
+  for (const c of result.cues ?? []) proposals.set(`${req.sid}|${t.id}|${c.role}|${c.label.toLowerCase()}`, { qloo_entity_id: c.qloo_entity_id, qloo_entity_type: c.qloo_entity_type, source: c.source, connection: c.connection });
+  if (proposals.size > 5000) proposals.delete(proposals.keys().next().value);
+  res.json({ ...result, familiar, calls: log });
 }));
+const proposals = new Map();
 
 // ---- Learner cue choices (explicit recognition required) ----
 app.get("/api/learner/cues/:termId", (req, res) => res.json(q.cuesFor.all(req.sid, req.params.termId)));
@@ -448,7 +461,11 @@ app.post("/api/learner/cues", wrap(async (req, res) => {
   if (pii) return res.status(400).json({ error: `That looks like a ${pii}.` });
   const source = ["editorial", "qloo-grounded", "agent (no verified Qloo ID)", "learner", "synthetic", "pick"].includes(b.source) ? b.source : "learner";
   let entityId = b.qloo_entity_id ?? null, entityType = b.qloo_entity_type ?? null, entityName = null, hook = null, rank = null;
-  if (source === "pick") {
+  const proposed = source === "pick" && b.via === "agent" ? proposals.get(`${req.sid}|${t.id}|${b.role}|${label.toLowerCase()}`) : null;
+  if (proposed) {
+    // A card the agent proposed on this session: its verified Qloo ID (or none), counted as an agent hook.
+    hook = "agent"; rank = null; entityId = proposed.qloo_entity_id; entityType = proposed.qloo_entity_type; entityName = proposed.qloo_entity_id ? label : null;
+  } else if (source === "pick") {
     // A favorite pick is a taste signal: the packet says which public entity it stands for (the browser's word is not
     // trusted), its Qloo ID is resolved once, and the card it was picked from says whether the hook came from taste.
     const { option, hook_source, shown_rank } = hookSourceFor(req.sid, t, b.role, label);
@@ -459,7 +476,13 @@ app.post("/api/learner/cues", wrap(async (req, res) => {
     entityId = entityName ? await resolveEntity((op, args) => runQloo(req.sid, op, args), entityName, entityType, live ? {} : { budget: () => 0 }) : null;
   }
   q.addCue.run(req.sid, t.id, b.role, label, connection, source, entityId, entityType, 1, Date.now(), entityName, hook, rank);
-  if (source === "pick") credits.activate(req.sid);
+  if (source === "pick") {
+    credits.activate(req.sid);
+    // The learner graph (graph.mjs): the pick as a public entity, and the kind of hook it made.
+    const role = t.roles.find((r) => r.id === b.role);
+    recordNode(req.sid, "pick", entityId ?? entityName ?? label, label, { term_id: t.id, role: b.role, type: entityType, entity_id: entityId, hook_source: hook, shown_rank: rank });
+    recordNode(req.sid, "hook", role?.sound_like ? "sound" : "meaning", role?.part ?? role?.label ?? b.role, { term_id: t.id, role: b.role, part: role?.part ?? null, sound_like: role?.sound_like ?? null });
+  }
   res.json(q.cuesFor.all(req.sid, t.id));
 }));
 
@@ -511,6 +534,7 @@ app.post("/api/attempts", (req, res) => {
     db.exec("BEGIN IMMEDIATE");
     q.insertAttempt.run(req.sid, term.id, prompt.id, prompt.skill, response, result.outcome, hinted ? 1 : 0, independent ? 1 : 0, String(term.version), term.review.status, idem, Date.now());
     q.consumeHints.run(req.sid, prompt.id);
+    recordNode(req.sid, "outcome", term.id, term.title, { prompt_id: prompt.id, skill: prompt.skill, outcome: result.outcome, hinted, independent });
     db.exec("COMMIT");
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}
@@ -625,6 +649,14 @@ app.get("/api/admin/degrees", admin, (req, res) => {
   if (req.query.format === "text") return res.type("text/plain").send(degreesText(report));
   res.json(report);
 });
+
+// One learner's graph over time: nodes in order, the tag-bag embedding, and the trajectory between snapshots.
+// Tags are learned through the admin's own metered Qloo runner, a few per look, and kept for ever.
+app.get("/api/admin/learners/:sid/graph", admin, wrap(async (req, res) => {
+  if (!/^[a-f0-9]{32}$/.test(req.params.sid)) return res.status(400).json({ error: "sid is 32 hex characters" });
+  if (!q.getLevel.get(req.params.sid)) return res.status(404).json({ error: "unknown learner" });
+  res.json(await learnerGraph(req.params.sid, (op, args) => runQloo(req.sid, op, args)));
+}));
 
 app.get("/api/admin/lessons/:id", admin, (req, res) => {
   const doc = lessons.get(req.params.id);

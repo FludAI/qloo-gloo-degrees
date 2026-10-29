@@ -2,9 +2,9 @@
 // Qloo grounds WHICH cultural entities a taste cluster knows; Claude decides HOW an entity can
 // carry a specific part of the concept (a sound, a meaning, an operation). The learner then
 // confirms recognition. Qloo affinity never sets familiarity, mastery or retention.
-import Anthropic from "@anthropic-ai/sdk";
+import { complete, anyAvailable, MODELS } from "./providers.mjs";
 
-export const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5";
+export const MODEL = MODELS.anthropic;
 const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 8);
 
 const ENTITY_TYPES = ["artist", "book", "brand", "movie", "person", "place", "podcast", "tv_show", "videogame"];
@@ -66,8 +66,9 @@ Rules:
 - Do not request or use personal data. Keep each connection to one sentence.
 - Be efficient: at most ${MAX_STEPS - 1} Qloo calls.`;
 
+// Live when any model provider has a key (providers.mjs); the session's arm picks which one answers.
 export function agentMode() {
-  return process.env.ANTHROPIC_API_KEY ? "live" : "unavailable";
+  return anyAvailable() ? "live" : "unavailable";
 }
 
 const idsIn = (envelope) => {
@@ -100,11 +101,12 @@ function validate(term, proposal, seenIds) {
 
 // run(op, args) -> Qloo envelope (already guarded, cached and logged by the caller)
 // `focus` names the role the learner is on ("None of these" on that card): the agent fills it first.
-export async function runCueAgent({ term, familiar, run, focus = null }) {
-  if (agentMode() !== "live") return { status: "unavailable", reason: "ANTHROPIC_API_KEY is not configured on the server.", cues: [], trace: [] };
+// `provider` is the session's model arm; `sid` goes on each step's provider_calls row (task cue_agent_step).
+export async function runCueAgent({ term, familiar, run, focus = null, provider = "anthropic", sid = null }) {
+  if (agentMode() !== "live") return { status: "unavailable", reason: "No model provider is configured on the server.", cues: [], trace: [] };
 
-  const client = new Anthropic();
   const tools = [...QLOO_TOOLS, proposeTool(term)];
+  let used = null;
   const trace = [];
   const seenIds = new Set();
   const usage = { input_tokens: 0, output_tokens: 0 };
@@ -114,9 +116,9 @@ export async function runCueAgent({ term, familiar, run, focus = null }) {
   for (let step = 0; step < MAX_STEPS; step++) {
     // Current models reject forced tool choice; at the step limit the model is told to finish instead.
     if (step === MAX_STEPS - 1) messages.push({ role: "user", content: "Step limit reached. Call propose_cues now with the best cues from the Qloo results you already have." });
-    const res = await client.messages.create({
-      model: MODEL, max_tokens: 1500, system: systemPrompt(term), tools, messages, tool_choice: { type: "auto" },
-    });
+    const out = await complete({ provider, task: "cue_agent_step", sid, max_tokens: 1500, system: systemPrompt(term), tools, messages, tool_choice: { type: "auto" } });
+    const res = out.res;
+    used = { provider: out.provider, model: out.model, fallback_from: out.fallback_from };
     usage.input_tokens += res.usage?.input_tokens ?? 0;
     usage.output_tokens += res.usage?.output_tokens ?? 0;
     messages.push({ role: "assistant", content: res.content });
@@ -124,7 +126,7 @@ export async function runCueAgent({ term, familiar, run, focus = null }) {
     const calls = res.content.filter((b) => b.type === "tool_use");
     const final = calls.find((c) => c.name === "propose_cues");
     if (final) {
-      return { status: "ok", model: MODEL, cues: validate(term, final.input, seenIds), notes: final.input.notes ?? "", trace, usage };
+      return { status: "ok", ...used, cues: validate(term, final.input, seenIds), notes: final.input.notes ?? "", trace, usage };
     }
     if (calls.length === 0) {
       messages.push({ role: "user", content: "Please finish by calling propose_cues." });
@@ -140,7 +142,7 @@ export async function runCueAgent({ term, familiar, run, focus = null }) {
     }
     messages.push({ role: "user", content: results });
   }
-  return { status: "partial", model: MODEL, cues: [], notes: "Step limit reached without a proposal.", trace, usage };
+  return { status: "partial", ...used, cues: [], notes: "Step limit reached without a proposal.", trace, usage };
 }
 
 // Deterministic stand-in for UI work without model or Qloo keys. Always labeled SYNTHETIC.

@@ -2,10 +2,9 @@
 // Deterministic checks run first (rubrics, sounds, say/ipa, length) and are reported even when the model
 // is unavailable; the model is then asked once to fill in replacements for what was flagged and to add its
 // own proposals under the product rules. A person accepts some, discards the rest (lessons.mjs: pending).
-import Anthropic from "@anthropic-ai/sdk";
+import { complete, toolCall } from "./providers.mjs";
 import { doubleMetaphone } from "double-metaphone";
 import { distance } from "fastest-levenshtein";
-import { MODEL } from "./agent.mjs";
 import { TRUTH_RULE } from "./drafter.mjs";
 import { compilePacket, applyPatch, validatePacket, readPath, parsePath, pathToPatch, mergePatches, arr } from "./lessons.mjs";
 import { assess, parseNumber, NUMERIC_TOLERANCE } from "./assess.mjs";
@@ -155,14 +154,15 @@ const REVIEW_TOOL = {
     required: ["proposals", "notes"] },
 };
 
+// The owner's reviewer stays on Claude whatever the owner session's arm; the call is logged without a session.
 async function askModel({ system, user }) {
-  const client = new Anthropic();
-  const res = await client.messages.create({
-    model: MODEL, max_tokens: 6000, system: `${system}\n\nRespond only by calling the ${REVIEW_TOOL.name} tool.`,
+  const { res } = await complete({
+    provider: "anthropic", task: "review_lesson", sid: null,
+    max_tokens: 6000, system: `${system}\n\nRespond only by calling the ${REVIEW_TOOL.name} tool.`,
     tools: [REVIEW_TOOL], tool_choice: { type: "auto" },
     messages: [{ role: "user", content: user }],
   });
-  const call = res.content.find((b) => b.type === "tool_use" && b.name === REVIEW_TOOL.name);
+  const call = toolCall(res, REVIEW_TOOL.name);
   if (!call) throw new Error("model returned no structured output");
   return call.input;
 }

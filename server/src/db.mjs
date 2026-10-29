@@ -65,10 +65,15 @@ if (!db.prepare("PRAGMA table_info(first_attempts)").all().some((c) => c.name ==
 // with ?qloo=N; and on each offered card, how long the server took to build it.
 {
   const cols = db.prepare("PRAGMA table_info(learners)").all().map((c) => c.name);
-  for (const [col, type] of [["qloo_level", "INTEGER"], ["qloo_forced", "INTEGER NOT NULL DEFAULT 0"], ["qloo_level_at", "INTEGER"]]) {
+  for (const [col, type] of [["qloo_level", "INTEGER"], ["qloo_forced", "INTEGER NOT NULL DEFAULT 0"], ["qloo_level_at", "INTEGER"], ["model_arm", "TEXT"], ["model_forced", "INTEGER NOT NULL DEFAULT 0"]]) {
     if (!cols.includes(col)) db.exec(`ALTER TABLE learners ADD COLUMN ${col} ${type}`);
   }
   if (!db.prepare("PRAGMA table_info(pick_offers)").all().some((c) => c.name === "build_ms")) db.exec("ALTER TABLE pick_offers ADD COLUMN build_ms REAL");
+  // Model calls (providers.mjs): which model answered, what it cost in tokens, and whether the arm asked for fell back.
+  const calls = db.prepare("PRAGMA table_info(provider_calls)").all().map((c) => c.name);
+  for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"]]) {
+    if (!calls.includes(col)) db.exec(`ALTER TABLE provider_calls ADD COLUMN ${col} ${type}`);
+  }
 }
 
 export const q = {
@@ -76,8 +81,9 @@ export const q = {
   ensureLearner: db.prepare("INSERT OR IGNORE INTO learners (sid, created_at) VALUES (?, ?)"),
   isUnlocked: db.prepare("SELECT unlocked FROM learners WHERE sid = ?"),
   unlock: db.prepare("UPDATE learners SET unlocked = 1 WHERE sid = ?"),
-  getLevel: db.prepare("SELECT qloo_level, qloo_forced, qloo_level_at FROM learners WHERE sid = ?"),
+  getLevel: db.prepare("SELECT qloo_level, qloo_forced, qloo_level_at, model_arm, model_forced FROM learners WHERE sid = ?"),
   setLevel: db.prepare("UPDATE learners SET qloo_level = ?, qloo_forced = ?, qloo_level_at = ? WHERE sid = ?"),
+  setArm: db.prepare("UPDATE learners SET model_arm = ?, model_forced = ? WHERE sid = ?"),
   getFirst: db.prepare("SELECT * FROM first_attempts WHERE sid = ? AND term_id = ?"),
   putFirst: db.prepare("INSERT OR IGNORE INTO first_attempts (sid, term_id, response, skipped, content_version, created_at, pieces) VALUES (?, ?, ?, ?, ?, ?, ?)"),
   attemptByKey: db.prepare("SELECT * FROM attempts WHERE sid = ? AND idem_key = ?"),
@@ -111,6 +117,7 @@ export const q = {
   editCue: db.prepare("UPDATE learner_cues SET connection = ? WHERE id = ? AND sid = ? AND removed_at IS NULL"),
   removeCue: db.prepare("UPDATE learner_cues SET removed_at = ? WHERE id = ? AND sid = ?"),
   logCall: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+  logModel: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at, model, tokens_in, tokens_out, fallback_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   callCounts: db.prepare("SELECT provider, status, COUNT(*) AS n FROM provider_calls WHERE sid = ? GROUP BY provider, status"),
 };
 

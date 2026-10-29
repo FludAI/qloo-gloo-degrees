@@ -21,7 +21,7 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
     const mic = mics[mics.length - 1] ?? null;
     const last = gates[gates.length - 1] ?? null;
     const live = gates.some((x) => x.state === "live");
-    const reads = c.filter((x) => x.provider === "anthropic" && x.op === "read_word");
+    const reads = c.filter((x) => ["anthropic", "meta"].includes(x.provider) && x.op === "read_word");
     const readOk = reads.filter((x) => x.status === "ok").length;
     const captures = { camera: r.filter((x) => x.mode === "camera").length, voice: r.filter((x) => x.mode === "voice").length, typed: r.filter((x) => x.mode === "typed").length };
     const picks = cu.filter((x) => x.source === "pick");

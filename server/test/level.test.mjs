@@ -11,7 +11,8 @@ process.env.DB_PATH = ":memory:";
 process.env.MEDIA_LOCAL = "1";
 process.env.MEDIA_DIR = mkdtempSync(join(tmpdir(), "gloo-level-"));
 const { q } = await import("../src/db.mjs");
-const { assignLevel, forceLevel, levelFor, levelInfo, parseLevel, LEVELS, POOL, DEGREES } = await import("../src/level.mjs");
+delete process.env.ANTHROPIC_API_KEY; delete process.env.META_API_KEY; delete process.env.MODEL_ARMS;
+const { assignLevel, forceLevel, levelFor, levelInfo, parseLevel, LEVELS, POOL, DEGREES, armPool, assignArm, forceArm, armFor, parseArm } = await import("../src/level.mjs");
 const { tailorRole, tailorTerm } = await import("../src/taste.mjs");
 
 const learner = () => { const sid = randomBytes(16).toString("hex"); q.ensureLearner.run(sid, Date.now()); return sid; };
@@ -43,6 +44,31 @@ test("stickiness: the level is read back unchanged; forcing it overrides and sta
   assert.equal(forceLevel(a, "7"), null); assert.equal(forceLevel(a, "x"), null); assert.equal(forceLevel(a, ""), null);
   assert.equal(levelFor(a), 2);
   assert.deepEqual(["0", "3", 1, "4", "-1", "1.5", null, undefined, ""].map(parseLevel), [0, 3, 1, null, null, null, null, null, null]);
+});
+
+test("model arm: drawn from the keyed providers (anthropic alone without keys), forced with ?model=, sticky, and read with the level", () => {
+  assert.deepEqual(armPool(), ["anthropic"], "no key anywhere: every session is on the default arm");
+  const a = learner();
+  assert.equal(armFor(a), "anthropic");
+  process.env.META_API_KEY = "test-not-a-key";
+  assert.deepEqual(armPool(), ["meta"], "only the keyed provider is drawn");
+  process.env.ANTHROPIC_API_KEY = "test-not-a-key";
+  assert.deepEqual(armPool(), ["anthropic", "meta"]);
+  const seen = { anthropic: 0, meta: 0 };
+  for (let i = 0; i < 200; i++) seen[armFor(learner())]++;
+  assert.ok(seen.anthropic > 50 && seen.meta > 50, JSON.stringify(seen));
+  process.env.MODEL_ARMS = "meta";
+  assert.deepEqual(armPool(), ["meta"], "MODEL_ARMS overrides the keys");
+  assert.equal(assignArm(learner(), { random: () => 0.9, arms: ["anthropic", "meta"] }), "meta");
+  const b = learner();
+  const first = armFor(b);
+  for (let i = 0; i < 10; i++) assert.equal(armFor(b), first);
+  assert.equal(forceArm(b, "meta"), "meta"); assert.equal(armFor(b), "meta");
+  assert.equal(forceArm(b, "openai"), null); assert.equal(armFor(b), "meta");
+  const info = levelInfo(b);
+  assert.deepEqual(info.model, { arm: "meta", forced: true, arms: ["anthropic", "meta"], available: { anthropic: true, meta: true } });
+  assert.deepEqual(["meta", "anthropic", "", null, "x"].map(parseArm), ["meta", "anthropic", null, null, null]);
+  delete process.env.MODEL_ARMS; delete process.env.META_API_KEY; delete process.env.ANTHROPIC_API_KEY;
 });
 
 test("suppression: level 0 leaves every card editorial with reason 'level 0' and makes no call; level 1 ranks", async () => {

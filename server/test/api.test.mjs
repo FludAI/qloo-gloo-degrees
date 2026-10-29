@@ -18,12 +18,23 @@ const PORT = 8799;
 let fake, proc, calls = 0, ttsCalls = 0, reviewInstruction = null;
 
 // Fake Anthropic Messages API: one Qloo describe call, then a proposal with one real and one invented ID.
-const reply = (content) => ({ id: "msg", type: "message", role: "assistant", model: "fake", stop_reason: "tool_use", content, usage: { input_tokens: 10, output_tokens: 10 } });
+let replyModel = "fake";
+const reply = (content) => ({ id: "msg", type: "message", role: "assistant", model: replyModel, stop_reason: "tool_use", content, usage: { input_tokens: replyModel === "fake-meta" ? 7 : 10, output_tokens: replyModel === "fake-meta" ? 3 : 10 } });
 before(async () => {
   fake = createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c));
     req.on("end", () => {
       const parsed = JSON.parse(body || "{}");
+      // The fake Meta Model API: the same Messages protocol under /meta, a bearer token, no x-api-key.
+      const meta = req.url.startsWith("/meta/");
+      replyModel = meta ? "fake-meta" : "fake";
+      if (meta) {
+        assert.equal(req.url, "/meta/v1/messages");
+        assert.match(String(req.headers.authorization ?? ""), /^Bearer test-meta-key$/);
+        assert.equal(req.headers["x-api-key"], undefined);
+        assert.equal(parsed.model, "muse-spark-1.3");
+        assert.ok(!JSON.stringify(parsed).includes("gloo_sid"), "nothing identifies the learner");
+      }
       if (req.url === "/tts") {
         // Fake Text-to-Speech: echoes the SSML it was sent as the "audio", so the test can read what was said;
         // when time points are asked for, every <mark> gets one, 0.25 s apart.
@@ -100,7 +111,8 @@ before(async () => {
   proc = spawn(process.execPath, [SERVER, "--mock"], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: ":memory:", ANTHROPIC_API_KEY: "test-not-a-key", ANTHROPIC_BASE_URL: "http://localhost:8798",
       TTS_ENDPOINT: "http://localhost:8798/tts", MEDIA_LOCAL: "1", MEDIA_DIR: mkdtempSync(join(tmpdir(), "gloo-api-media-")), LIMIT_TTS_PER_SESSION_HOUR: "2",
-      ADMIN_TOKEN: "test-owner-token", QLOO_LEVELS: "1" }, // every session draws degree 1 (production's behavior); the degrees test forces others
+      ADMIN_TOKEN: "test-owner-token", QLOO_LEVELS: "1", // every session draws degree 1 (production's behavior); the degrees test forces others
+      META_API_KEY: "test-meta-key", META_BASE_URL: "http://localhost:8798/meta", MODEL_ARMS: "anthropic" }, // the fake Meta backend; sessions draw the anthropic arm unless forced
     stdio: "ignore",
   });
   // A cold start on Windows can take several seconds; wait up to 30 s.
@@ -487,7 +499,7 @@ test("degrees: a session draws a level, ?qloo=N forces and sticks, level 0 suppr
   assert.ok(zero.sessions >= 1); assert.ok(zero.forced >= 1); assert.ok(zero.cards >= 4); assert.ok(zero.picks >= 1); assert.ok(zero.first_tile_picks >= 1);
   assert.ok(zero.skipped_cards >= 3); assert.equal(zero.qloo_calls, 0); assert.equal(typeof zero.median_build_ms, "number"); assert.equal(typeof zero.median_pick_ms, "number");
   assert.ok(zero.rates.first_tile > 0 && zero.rates.skip > 0); assert.ok(zero.tiles >= zero.cards * 2 && zero.tiles <= zero.cards * 4);
-  assert.deepEqual(Object.keys(zero.rates), ["first_tile", "picture", "skip", "practice_correct", "independent", "recall_sessions", "taste_picks"]);
+  assert.deepEqual(Object.keys(zero.rates), ["first_tile", "picture", "skip", "practice_correct", "independent", "recall_sessions", "taste_picks", "read_ok", "draft_ok", "draft_accepted"]);
   const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
   assert.match(text, /^sessions since /); assert.match(text, /\n0 +editorial /); assert.match(text, /\n3 +agent doorway /);
   // The testers report carries the level of each session.
@@ -591,6 +603,53 @@ test("learner graph: words, picks, hooks and outcomes become nodes in order; the
   // Deleting the learner's data removes the graph too.
   await s("DELETE", "/api/learner");
   assert.equal((await s("GET", "/api/export")).body.learner_nodes.length, 0);
+});
+
+test("model arm: ?model=meta sends the camera read, the drafter, the hearing fix and the agent to the Meta backend, logs model and tokens per call, and the report splits by arm", async () => {
+  const s = session();
+  const l = (await s("GET", "/api/level?model=meta")).body;
+  assert.deepEqual(l.model, { arm: "meta", forced: true, arms: ["anthropic", "meta"], available: { anthropic: true, meta: true } });
+  assert.equal((await s("GET", "/api/level?model=openai")).body.model.arm, "meta", "a bad value changes nothing");
+  assert.equal((await s("GET", "/api/level")).body.model.arm, "meta", "sticky");
+  // Camera read: the crop goes to the Meta backend (multimodal), the row names the model and the tokens.
+  const read = (await s("POST", "/api/glue", { mode: "camera", image: "x".repeat(200), mime: "image/jpeg" })).body;
+  assert.equal(read.term_id, "cholecystokinin");
+  // A new word: the hearing fix (resolve_term) and the draft go to Meta too.
+  const drafted = (await s("POST", "/api/glue", { text: "zzqxv", mode: "typed" })).body;
+  assert.equal(drafted.created, true);
+  // The agent: tool calling through the same protocol, every step logged on the arm.
+  await s("GET", "/api/level?qloo=3");
+  await s("POST", "/api/terms/brier-score/first-attempt", { skipped: true });
+  const agent = (await s("POST", "/api/cues/agent", { term_id: "brier-score", familiar: ["Breyers"] })).body;
+  assert.equal(agent.status, "ok"); assert.equal(agent.provider, "meta"); assert.equal(agent.model, "muse-spark-1.3"); assert.equal(agent.fallback_from, null);
+  assert.equal(agent.cues[0].qloo_entity_id, "mock-breyers");
+  const rows = (await s("GET", "/api/export")).body.provider_calls.filter((c) => ["anthropic", "meta"].includes(c.provider));
+  assert.ok(rows.length >= 5, `${rows.length} model rows`);
+  assert.ok(rows.every((c) => c.provider === "meta" && c.model === "muse-spark-1.3" && c.fallback_from === null), JSON.stringify(rows.map((c) => [c.provider, c.op, c.model])));
+  assert.deepEqual(rows.map((c) => c.op).sort(), ["cue_agent", "cue_agent_step", "cue_agent_step", "draft_lesson", "read_word", "resolve_term"]);
+  const readRow = rows.find((c) => c.op === "read_word");
+  assert.equal(readRow.status, "ok"); assert.equal(readRow.tokens_in, 7); assert.equal(readRow.tokens_out, 3); assert.ok(readRow.duration_ms > 0);
+  assert.equal(rows.find((c) => c.op === "cue_agent").tokens_in, 14, "the run's row sums its steps");
+  // The other arm, on the same tasks, lands on the Anthropic fake.
+  const a = session();
+  assert.equal((await a("GET", "/api/level?model=anthropic")).body.model.arm, "anthropic");
+  await a("POST", "/api/glue", { mode: "camera", image: "x".repeat(200), mime: "image/jpeg" });
+  const arows = (await a("GET", "/api/export")).body.provider_calls.filter((c) => c.op === "read_word");
+  assert.deepEqual(arows.map((c) => [c.provider, c.model, c.tokens_in]), [["anthropic", "claude-sonnet-5-5", 10]]);
+  // The report: a models section and level-by-arm cells, plus the testers report counting Meta reads as reads.
+  const r = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  const meta = r.models.find((m) => m.arm === "meta"), anth = r.models.find((m) => m.arm === "anthropic");
+  assert.ok(meta.sessions >= 1 && meta.forced >= 1 && meta.reads_ok >= 1 && meta.drafts_ok >= 1 && meta.agent_calls >= 1);
+  assert.ok(meta.tokens_in >= 7 && meta.tokens_out >= 3 && meta.model_calls >= 4 && meta.fallbacks === 0);
+  assert.equal(typeof meta.median_ms.read_word, "number"); assert.equal(meta.rates.read_ok, 1);
+  assert.ok(anth.sessions >= 1 && anth.reads_ok >= 1);
+  assert.ok(r.cells.some((c) => c.level === 3 && c.arm === "meta" && c.sessions >= 1));
+  const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
+  assert.match(text, /by model arm\n/); assert.match(text, /\nmeta +\d/); assert.match(text, /by degree and arm/);
+  const t = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  assert.ok(t.rows.some((row) => row.reads.ok >= 1 && row.level === 3));
+  const h = (await s("GET", "/api/health")).body;
+  assert.deepEqual(h.agent.available, { anthropic: true, meta: true }); assert.equal(h.agent.models.meta, "muse-spark-1.3");
 });
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {

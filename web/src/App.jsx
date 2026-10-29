@@ -36,6 +36,7 @@ export default function App() {
   const [pass, setPass] = useState(null); // { retry }
   const [credits, setCredits] = useState(null); // Gloo balance and referral link
   const [degree, setDegree] = useState(null); // this session's degree of Qloo (0..3), read once
+  const [arm, setArm] = useState(null); // this session's model arm (anthropic | meta)
   const [empty, setEmpty] = useState(""); // the server's line when a new word would cost more Gloo than there is
   const toastTimer = useRef(null);
 
@@ -47,14 +48,14 @@ export default function App() {
     // A shared link can carry the passcode (?code=...), so nobody has to type it, a friend's referral (?ref=...),
     // or a word (?word=cholecystokinin): its lesson opens over the gate, no camera needed for a word Gloo knows.
     const params = new URLSearchParams(location.search);
-    const code = params.get("code"), ref = params.get("ref"), word = params.get("word"), qloo = params.get("qloo");
+    const code = params.get("code"), ref = params.get("ref"), word = params.get("word"), qloo = params.get("qloo"), model = params.get("model");
     const boot = Promise.resolve()
       .then(() => (code ? api.unlock(code).catch(() => {}) : null))
       .then(() => (ref ? api.claimReferral(ref).catch(() => {}) : null))
-      .then(() => { if (code || ref || word || qloo != null) history.replaceState(null, "", location.pathname); });
+      .then(() => { if (code || ref || word || qloo != null || model != null) history.replaceState(null, "", location.pathname); });
     boot.then(() => {
       loadHealth(); loadTerms(); loadCredits();
-      api.level().then((l) => setDegree(l.level)).catch(() => {});
+      api.level().then((l) => { setDegree(l.level); setArm(l.model?.arm ?? null); }).catch(() => {});
       if (word) { const id = word.toLowerCase().trim(); api.term(id).then(() => setSheet({ termId: id, glued: null })).catch(() => say(`Gloo doesn't know “${word}” yet. Point the camera at it.`)); }
     });
   }, [loadHealth, loadTerms, loadCredits]);
@@ -180,7 +181,7 @@ export default function App() {
       {sheet && <Flow termId={sheet.termId} glued={sheet.glued} health={health} guard={guard} credits={credits} onCredits={loadCredits} say={say} degree={degree}
         onClose={() => { setSheet(null); loadTerms(); }} onRegue={(body) => glue(body, "Gluing…")} />}
       {wordsOpen && <WordsSheet onPick={(id) => { setWordsOpen(false); warmAudio(); unlockAudio(); setSheet({ termId: id, glued: null }); }} onClose={() => setWordsOpen(false)} />}
-      {info && <InfoSheet health={health} micGranted={micGranted} degree={degree} onClose={() => setInfo(false)} />}
+      {info && <InfoSheet health={health} micGranted={micGranted} degree={degree} arm={arm} onClose={() => setInfo(false)} />}
       {pass && <Passcode onClose={() => setPass(null)} onUnlocked={async () => { const retry = pass.retry; setPass(null); await loadHealth(); if (retry) guard(retry); }} />}
     </div>
   );
@@ -204,7 +205,7 @@ function VerifyClip() {
   );
 }
 
-function InfoSheet({ health, micGranted, degree, onClose }) {
+function InfoSheet({ health, micGranted, degree, arm, onClose }) {
   const [msg, setMsg] = useState("");
   const download = async () => {
     const blob = new Blob([JSON.stringify(await api.exportData(), null, 2)], { type: "application/json" });
@@ -230,7 +231,7 @@ function InfoSheet({ health, micGranted, degree, onClose }) {
           </ul>
         )}
         {health?.tts === "google" && health?.unlocked && <VerifyClip />}
-        <p className="mt-4 text-xs text-paper/50">Only the framed crop and a few seconds of audio go to the server; nothing is stored. Motion studies: <a className="underline" href="/motion/studies.html">/motion/studies.html</a>.{degree != null && <span className="ml-2 font-mono text-[10px] text-paper/40">degree {degree}</span>}</p>
+        <p className="mt-4 text-xs text-paper/50">Only the framed crop and a few seconds of audio go to the server; nothing is stored. Motion studies: <a className="underline" href="/motion/studies.html">/motion/studies.html</a>.{degree != null && <span className="ml-2 font-mono text-[10px] text-paper/40">degree {degree}{arm ? ` · ${arm}` : ""}</span>}</p>
         <p className="mt-3 flex gap-3 text-xs text-paper/60">
           <button className="underline" onClick={download}>Export my data</button>
           <button className="underline" onClick={wipe}>Delete my data</button>

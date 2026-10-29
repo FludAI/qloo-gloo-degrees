@@ -30,7 +30,8 @@ import { DOMAIN_TERMS } from "./resolve/domain-terms.mjs";
 import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, familiarFor, MIN_PICKS, RESERVE as TASTE_RESERVE } from "./taste.mjs";
 import { record as recordNode, learnerGraph } from "./graph.mjs";
 import * as credits from "./credits.mjs";
-import { levelFor, forceLevel, levelInfo, parseLevel } from "./level.mjs";
+import { levelFor, forceLevel, levelInfo, parseLevel, armFor, forceArm, parseArm } from "./level.mjs";
+import { availability as modelAvailability, MODELS } from "./providers.mjs";
 import { qlooCards, CANDIDATES } from "./cards.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -100,6 +101,9 @@ app.use((req, res, next) => {
   // request (the page's own URL included), after which it sticks.
   const forced = parseLevel(Array.isArray(req.query.qloo) ? req.query.qloo[0] : req.query.qloo);
   req.level = forced != null ? forceLevel(sid, forced) : levelFor(sid);
+  // The model arm the same way: ?model=meta|anthropic forces it (providers.mjs), else drawn once.
+  const arm = parseArm(Array.isArray(req.query.model) ? req.query.model[0] : req.query.model);
+  req.arm = arm != null ? forceArm(sid, arm) : armFor(sid);
   next();
 });
 // Behind Cloud Run's proxy the client address is the first forwarded hop. Only ever hashed with a secret, for the referral soft signal.
@@ -147,7 +151,7 @@ app.get("/api/health", wrap(async (req, res) => {
   if (!MOCK) {
     try { qloo.ready = (await readiness()).ready; } catch (e) { qloo = { mode: "live", ready: false, error: e.message }; }
   }
-  const agent = agentMode() === "live" ? { mode: "live", model: MODEL } : MOCK ? { mode: "synthetic" } : { mode: "unavailable" };
+  const agent = agentMode() === "live" ? { mode: "live", model: MODEL, models: MODELS, available: modelAvailability() } : MOCK ? { mode: "synthetic" } : { mode: "unavailable" };
   const stt = MOCK ? "mock" : await sttMode();
   const [tts, mediaMode] = await Promise.all([ttsMode(), media.mode()]);
   res.json({ qloo, agent, stt, tts, voice: tts === "google" ? VOICE : null, media: mediaMode, camera: agentMode() === "live" ? "live" : MOCK ? "mock" : "unavailable",
@@ -302,11 +306,12 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
   if (agentMode() === "live") {
     const lim = take("agent", req.sid);
     if (!lim.ok) return res.status(429).json({ status: "limited", reason: lim.reason, cues: [], trace: [], calls: [] });
+    const t0 = performance.now();
     try {
-      result = await runCueAgent({ term: t, familiar, run, focus });
-      q.logCall.run(req.sid, "anthropic", "cue_agent", result.status, null, null, Date.now());
+      result = await runCueAgent({ term: t, familiar, run, focus, provider: req.arm, sid: req.sid });
+      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null);
     } catch (e) {
-      q.logCall.run(req.sid, "anthropic", "cue_agent", "error", null, null, Date.now());
+      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null);
       result = { status: "error", reason: e.status ? `Model provider error (${e.status}).` : "Model provider error.", cues: [], trace: [] };
     }
   } else if (MOCK) {
@@ -366,14 +371,15 @@ app.post("/api/glue", wrap(async (req, res) => {
     if (!image) return res.status(400).json({ error: "image is required" });
     if (!unlocked(req.sid)) return locked(res);
     let read;
-    if (MOCK) read = { word: "cholecystokinin", alternatives: ["gallbladder"], confidence: "high" };
+    // Mock Qloo without a model key: a fixed read. With a model key the frame goes to the session's model arm, mock Qloo or not.
+    if (MOCK && agentMode() !== "live") read = { word: "cholecystokinin", alternatives: ["gallbladder"], confidence: "high" };
     else if (agentMode() !== "live") return res.status(503).json({ error: "Camera reading needs the lesson agent, which isn't configured here." });
     else {
       const lim = take("camera", req.sid);
       if (!lim.ok) return res.status(429).json({ error: lim.reason });
       const t0 = performance.now();
-      try { read = await readWord({ image, mime }); q.logCall.run(req.sid, "anthropic", "read_word", read.word ? "ok" : "empty", null, performance.now() - t0, Date.now()); }
-      catch (e) { q.logCall.run(req.sid, "anthropic", "read_word", "error", null, performance.now() - t0, Date.now()); console.error("read_word:", e.message);
+      try { read = await readWord({ image, mime, provider: req.arm, sid: req.sid }); }
+      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null); console.error("read_word:", e.message);
         return res.status(502).json({ error: "Couldn't read the frame right now. Try again, say it, or type it." }); }
     }
     if (!read.word) return res.status(422).json({ error: "No word in the frame. Get closer and hold steady, or say it." });
@@ -395,8 +401,8 @@ app.post("/api/glue", wrap(async (req, res) => {
     if (agentMode() === "live" && unlocked(req.sid)) {
       const lim = take("agent", req.sid);
       if (lim.ok) {
-        try { best = await resolveWithLlm(local); q.logCall.run(req.sid, "anthropic", "resolve_term", best ? "ok" : "empty", null, null, Date.now()); }
-        catch { q.logCall.run(req.sid, "anthropic", "resolve_term", "error", null, null, Date.now()); }
+        try { best = await resolveWithLlm(local, { provider: req.arm, sid: req.sid }); }
+        catch (e) { console.error("resolve_term:", e.message); }
       }
     }
     // Without the LLM, a reasonable best guess beats a dead end; it is labeled as such.
@@ -426,8 +432,8 @@ app.post("/api/glue", wrap(async (req, res) => {
     // Degree 2: the drafter names more candidates per piece and Qloo keeps the ones it knows, pictures included (cards.mjs).
     const built = req.level >= 2;
     if (agentMode() === "live") {
-      try { packet = await draftLesson(id, best.word, { candidates: built ? CANDIDATES : 4 }); q.logCall.run(req.sid, "anthropic", "draft_lesson", "ok", null, null, Date.now()); }
-      catch (e) { q.logCall.run(req.sid, "anthropic", "draft_lesson", "error", null, null, Date.now()); console.error("draft_lesson:", e.message);
+      try { packet = await draftLesson(id, best.word, { candidates: built ? CANDIDATES : 4, provider: req.arm, sid: req.sid }); }
+      catch (e) { console.error("draft_lesson:", e.message);
         const back = credits.refundWord(req.sid, best.word);
         return res.status(502).json({ error: "Couldn't draft a lesson for that word right now. Your Gloo is back. Try again, or a reviewed lesson.", balance: back.balance }); }
     } else {
@@ -701,13 +707,10 @@ app.post("/api/admin/lessons/:id/suggest", admin, wrap(async (req, res) => {
   if (!field || typeof current !== "string") return res.status(400).json({ error: "field must name a text field of the lesson, e.g. summary or roles.chole.meaning", field });
   const instruction = String(req.body?.instruction ?? "").trim().slice(0, 600) || null;
   if (agentMode() !== "live") return res.status(503).json({ error: "The lesson agent isn't configured on this server.", code: "AGENT_UNAVAILABLE" });
-  const t0 = performance.now();
   try {
-    const out = await suggestField({ packet: adminView({ ...doc, history: [] }), field, current, instruction });
-    q.logCall.run(req.sid, "anthropic", "suggest_field", "ok", null, performance.now() - t0, Date.now());
+    const out = await suggestField({ packet: adminView({ ...doc, history: [] }), field, current, instruction, sid: req.sid });
     res.json({ field, current, suggestion: out.value, reason: out.reason, saved: false });
   } catch (e) {
-    q.logCall.run(req.sid, "anthropic", "suggest_field", "error", null, performance.now() - t0, Date.now());
     console.error("suggest_field:", e.message);
     res.status(502).json({ error: "The model didn't answer. Try again.", code: "SUGGEST_FAILED" });
   }
@@ -719,9 +722,7 @@ app.post("/api/admin/lessons/:id/review", admin, wrap(async (req, res) => {
   const doc = lessons.get(req.params.id);
   if (!doc) return res.status(404).json({ error: "unknown lesson" });
   const instruction = String(req.body?.instruction ?? "").trim().slice(0, 600) || null;
-  const t0 = performance.now();
   const { proposals, notes } = await reviewLesson(doc, { instruction });
-  if (agentMode() === "live") q.logCall.run(req.sid, "anthropic", "review_lesson", notes.some((n) => n.startsWith("The model call failed")) ? "error" : "ok", null, performance.now() - t0, Date.now());
   const saved = await lessons.setPending(doc.id, { created_at: new Date().toISOString(), by: req.editor, instruction, proposals, notes });
   res.json(adminView(saved));
 }));
@@ -752,9 +753,8 @@ app.post("/api/admin/lessons/draft", admin, wrap(async (req, res) => {
   if (lessons.get(id)) return res.status(409).json({ error: `lesson ${id} already exists` });
   let packet;
   if (agentMode() === "live") {
-    const t0 = performance.now();
-    try { packet = await draftLesson(id, word); q.logCall.run(req.sid, "anthropic", "draft_lesson", "ok", null, performance.now() - t0, Date.now()); }
-    catch (e) { q.logCall.run(req.sid, "anthropic", "draft_lesson", "error", null, performance.now() - t0, Date.now()); console.error("draft_lesson:", e.message);
+    try { packet = await draftLesson(id, word, { sid: req.sid }); }
+    catch (e) { console.error("draft_lesson:", e.message);
       return res.status(502).json({ error: "Couldn't draft a lesson for that word right now.", code: "DRAFT_FAILED" }); }
   } else if (MOCK) {
     packet = syntheticLesson(id, word);

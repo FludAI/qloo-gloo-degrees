@@ -1,26 +1,26 @@
 // LLM backup for word resolution, and provisional lessons for words without a reviewed packet.
 // Both are labeled wherever they appear. Neither is ever presented as reviewed content.
-import Anthropic from "@anthropic-ai/sdk";
-import { MODEL } from "./agent.mjs";
+import { complete, anyAvailable, toolCall } from "./providers.mjs";
 import { arr } from "./lessons.mjs";
 import { consistent } from "./syllables.mjs";
 
-const live = () => Boolean(process.env.ANTHROPIC_API_KEY);
+const live = () => anyAvailable();
 // Current models reject forced tool choice, so the instruction asks for the tool and we check for it.
-const forced = async (system, user, tool) => {
-  const client = new Anthropic();
-  const res = await client.messages.create({
-    model: MODEL, max_tokens: 2500, system: `${system}\n\nRespond only by calling the ${tool.name} tool.`,
+// `use` = { provider, sid, task }: the session's model arm and the row the call is logged on (providers.mjs).
+const forced = async (system, user, tool, use = {}) => {
+  const { res } = await complete({
+    provider: use.provider ?? "anthropic", task: use.task ?? tool.name, sid: use.sid ?? null,
+    max_tokens: 2500, system: `${system}\n\nRespond only by calling the ${tool.name} tool.`,
     tools: [tool], tool_choice: { type: "auto" },
     messages: [{ role: "user", content: user }],
   });
-  const call = res.content.find((b) => b.type === "tool_use" && b.name === tool.name);
+  const call = toolCall(res, tool.name);
   if (!call) throw new Error("model returned no structured output");
   return call.input;
 };
 
 // ---- Resolution backup: only called for close calls and misses ----
-export async function resolveWithLlm(local) {
+export async function resolveWithLlm(local, use = {}) {
   if (!live()) return null;
   const out = await forced(
     "You identify which word or term a learner meant. Input may be a phonetic attempt from speech recognition, a typo, or OCR noise. Return the standard spelling. If you cannot tell, set term to null.",
@@ -28,6 +28,7 @@ export async function resolveWithLlm(local) {
     { name: "resolve_term", description: "The intended term.", input_schema: { type: "object", properties: {
       term: { type: ["string", "null"], description: "Standard spelling, lowercase, or null" },
       reason: { type: "string" } }, required: ["term", "reason"] } },
+    { ...use, task: "resolve_term" },
   );
   const term = typeof out.term === "string" ? out.term.toLowerCase().replace(/[^\p{L}\p{N}' -]/gu, "").trim().slice(0, 60) : null;
   return term ? { word: term, term_id: null, score: null, method: "ai", reason: String(out.reason ?? "").slice(0, 200) } : null;
@@ -135,7 +136,7 @@ function shape(id, input, d, origin, { maxOptions = 4 } = {}) {
 }
 
 // `candidates` above four asks for that many pick options per piece (degree 2: Qloo keeps the ones it knows, cards.mjs).
-export async function draftLesson(id, word, { candidates = 4 } = {}) {
+export async function draftLesson(id, word, { candidates = 4, provider = "anthropic", sid = null } = {}) {
   const n = Math.max(4, Math.min(12, Number(candidates) || 4));
   const d = await forced(
     `You draft provisional lessons for Gloo, which teaches hard terms by first using the meaning already inside them (roots, parts, origin), then linking parts to familiar cues.
@@ -147,6 +148,7 @@ Only cite sources you are confident exist (major dictionaries, NIH/NCBI, Wikiped
 Every array field (components, roles, pick options, prompts, sources) must be a JSON array, never a string containing JSON.`,
     `Draft a provisional lesson for the term: "${word}"`,
     lessonTool(n),
+    { provider, sid, task: "draft_lesson" },
   );
   return shape(id, word, d, "ai-draft", { maxOptions: n });
 }
@@ -173,7 +175,7 @@ const SUGGEST_TOOL = {
     value: { type: "string", description: "The new value for the field, and nothing else: the same kind of content as the current value" },
     reason: { type: "string", description: "One sentence: what changed and why" } }, required: ["value", "reason"] },
 };
-export async function suggestField({ packet, field, current, instruction }) {
+export async function suggestField({ packet, field, current, instruction, sid = null }) {
   const out = await forced(
     `You help the owner of Gloo edit one field of a lesson. Gloo teaches hard words to people who cannot yet say them: it speaks every line aloud, shows almost no text, and teaches the sound pieces before the meaning.
 Keep lines short and natural when read aloud. A respelling stays a respelling; IPA stays IPA for US English with no slashes or brackets; a pick question stays a short spoken question; a rubric keyword list stays a list.
@@ -181,6 +183,7 @@ Be accurate; do not invent sources or etymology.
 ${TRUTH_RULE}`,
     `Lesson (JSON):\n${JSON.stringify(packet)}\n\nField to rewrite: ${field}\nCurrent value: ${JSON.stringify(current)}\n${instruction ? `Owner's instruction: ${instruction}` : "No instruction given: improve accuracy and clarity; keep the meaning and length."}`,
     SUGGEST_TOOL,
+    { sid, task: "suggest_field" },
   );
   return { value: clip(out.value, 1000), reason: clip(out.reason, 300) };
 }

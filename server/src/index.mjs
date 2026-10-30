@@ -309,9 +309,9 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
     const t0 = performance.now();
     try {
       result = await runCueAgent({ term: t, familiar, run, focus, provider: req.arm, sid: req.sid });
-      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null);
+      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null, null, null);
     } catch (e) {
-      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null);
+      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null);
       result = { status: "error", reason: e.status ? `Model provider error (${e.status}).` : "Model provider error.", cues: [], trace: [] };
     }
   } else if (MOCK) {
@@ -379,7 +379,7 @@ app.post("/api/glue", wrap(async (req, res) => {
       if (!lim.ok) return res.status(429).json({ error: lim.reason });
       const t0 = performance.now();
       try { read = await readWord({ image, mime, provider: req.arm, sid: req.sid }); }
-      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null); console.error("read_word:", e.message);
+      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null); console.error("read_word:", e.message);
         return res.status(502).json({ error: "Couldn't read the frame right now. Try again, say it, or type it." }); }
     }
     if (!read.word) return res.status(422).json({ error: "No word in the frame. Get closer and hold steady, or say it." });

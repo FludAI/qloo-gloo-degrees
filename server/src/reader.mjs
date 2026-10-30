@@ -28,7 +28,7 @@ export async function readWord({ image, mime = "image/jpeg", provider = "anthrop
     ] }],
   });
   const call = toolCall(out.res, "read_word");
-  const logged = (word) => q.logModel.run(sid, out.provider, "read_word", word ? "ok" : "empty", null, out.ms, Date.now(), out.model, out.usage.input, out.usage.output, out.fallback_from);
+  const logged = (word) => q.logModel.run(sid, out.provider, "read_word", word ? "ok" : "empty", null, out.ms, Date.now(), out.model, out.usage.input, out.usage.output, out.fallback_from, out.stop, out.note);
   if (!call) { logged(null); return { word: null, alternatives: [], confidence: "low", used: out.provider }; }
   const clean = (s) => String(s ?? "").replace(/[“”"`]/g, "").trim().slice(0, 60);
   const word = typeof call.input.word === "string" ? clean(call.input.word) : "";

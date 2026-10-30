@@ -16,7 +16,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   const offers = db.prepare("SELECT term_id, role, tailored, options, at, build_ms FROM pick_offers WHERE sid = ?");
   const picks = db.prepare("SELECT term_id, role, label, hook_source, shown_rank, created_at FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick'");
   const attempts = db.prepare("SELECT outcome, independent FROM attempts WHERE sid = ?");
-  const calls = db.prepare("SELECT provider, op, status, cache, duration_ms, model, tokens_in, tokens_out, fallback_from FROM provider_calls WHERE sid = ?");
+  const calls = db.prepare("SELECT provider, op, status, cache, duration_ms, model, tokens_in, tokens_out, fallback_from, stop, note FROM provider_calls WHERE sid = ?");
   const drafts = db.prepare("SELECT id FROM provisional_terms WHERE sid = ?");
   const hasArt = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'art'").get();
   const artOk = hasArt ? db.prepare("SELECT mime FROM art WHERE title = ?") : null;
@@ -27,7 +27,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   const statsOf = (sid) => {
     const s = { cards: 0, tailored_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0,
       answers: 0, correct: 0, independent: 0, recall: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
-      qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, tokens_in: 0, tokens_out: 0,
+      qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, tokens_in: 0, tokens_out: 0,
       build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) };
     const o = offers.all(sid), p = picks.all(sid), a = attempts.all(sid), c = calls.all(sid), d = drafts.all(sid);
     const pickAt = new Map(p.map((x) => [`${x.term_id}|${x.role}`, x]));
@@ -52,6 +52,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
       if (x.op === "draft_lesson") { s.drafts_tried++; if (x.status === "ok") s.drafts_ok++; }
       if (x.op === "cue_agent_step") continue; // steps roll up into the run's row
       s.model_calls++; if (x.status === "error") s.model_errors++; if (x.fallback_from) s.fallbacks++;
+      if (x.stop === "max_tokens") s.model_cut++; if (x.note === "tool_from_text") s.text_tools++;
       s.tokens_in += x.tokens_in ?? 0; s.tokens_out += x.tokens_out ?? 0;
       if (s.ms[x.op] && Number.isFinite(x.duration_ms)) s.ms[x.op].push(x.duration_ms);
     }
@@ -59,7 +60,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   };
   const blank = (extra) => ({ ...extra, sessions: 0, forced: 0, cards: 0, tailored_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0,
     answers: 0, correct: 0, independent: 0, recall_sessions: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
-    qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, tokens_in: 0, tokens_out: 0,
+    qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, tokens_in: 0, tokens_out: 0,
     build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) });
   const add = (g, s, forced) => {
     g.sessions++; if (forced) g.forced++;
@@ -115,14 +116,14 @@ export function degreesText(report) {
     pct(g.rates.first_tile), pct(g.rates.picture), pct(g.rates.skip), `${g.correct}/${g.answers}`, `${g.independent} (${g.recall_sessions} sess)`, String(g.own_picks),
     String(g.qloo_calls), String(g.qloo_cache_hits), String(g.agent_calls), String(g.agent_picks), String(g.drafted_words), ms(g.median_build_ms), ms(g.median_pick_ms)]);
   const modelRows = report.models.map((g) => [g.arm, sessions(g), `${g.reads_ok}/${g.reads_tried}`, `${g.drafts_ok}/${g.drafts_tried}`, pct(g.rates.draft_accepted),
-    pct(g.rates.picture), pct(g.rates.first_tile), `${g.correct}/${g.answers}`, String(g.independent), String(g.model_calls), String(g.model_errors), String(g.fallbacks),
+    pct(g.rates.picture), pct(g.rates.first_tile), `${g.correct}/${g.answers}`, String(g.independent), String(g.model_calls), String(g.model_errors), String(g.fallbacks), `${g.model_cut}/${g.text_tools}`,
     `${g.tokens_in}/${g.tokens_out}`, ms(g.median_ms.read_word), ms(g.median_ms.draft_lesson), ms(g.median_ms.cue_agent)]);
   const cellRows = report.cells.map((g) => [g.level ?? "?", g.arm, sessions(g), String(g.cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.independent), String(g.drafted_words), String(g.agent_picks)]);
   return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}`, "", "by degree of Qloo",
     ...table(["level", "degree", "sessions", "cards", "tailored", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"], levelRows),
     "", "by model arm",
-    ...table(["arm", "sessions", "reads", "drafts", "accepted", "pictures", "1st-tile", "practice", "recall", "calls", "errors", "fallbacks", "tokens in/out", "read ms", "draft ms", "agent ms"], modelRows),
+    ...table(["arm", "sessions", "reads", "drafts", "accepted", "pictures", "1st-tile", "practice", "recall", "calls", "errors", "fallbacks", "cut/text", "tokens in/out", "read ms", "draft ms", "agent ms"], modelRows),
     "", "by degree and arm",
     ...table(["level", "arm", "sessions", "cards", "1st-tile", "pictures", "practice", "recall", "drafts", "agent-picks"], cellRows),
-    "", "1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
+    "", "1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); cut/text: model answers cut at the output cap / tool calls the model wrote as JSON text; build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
 }

@@ -165,6 +165,7 @@ Environment variables (defaults shown):
 | `QLOO_TAGS_PER_REQUEST` | `10` | `entity_tags` calls one owner look at `/api/admin/learners/:sid/graph` may spend on entities not yet tagged |
 | `META_API_KEY` | unset | Meta Model API key (secret `meta-api-key`), the second model backend (`server/src/providers.mjs`): Muse Spark through the API's chat-completions surface (`POST https://api.meta.ai/v1/chat/completions`). Unset = the muse arm reports unavailable and falls back to Claude, recorded on the call's row |
 | `META_MODEL` / `META_BASE_URL` | `muse-spark-1.3` / `https://api.meta.ai` | The Meta model (multimodal, tool calling) and where to reach it |
+| `META_REASONING_EFFORT` / `META_REASONING_HEADROOM` | `low` / `6000` | Muse Spark always reasons and its reasoning tokens count against the output cap: every muse request sets this effort (unless the task asks for one) and adds this many tokens to its cap. A call that still comes back cut, or that writes its tool call as text, is marked on its row (`stop`, `note`) and counted in the degrees report (`cut/text`) |
 | `MODEL_ARMS` | the keyed providers | Which model arms a new session may draw (`anthropic,muse`); `?model=muse` on any URL forces one for that session; `GET /api/level` reads it under `model`; the degrees report splits every outcome by arm |
 
 Set a budget alert on the Anthropic account too. Qloo hackathon keys expire

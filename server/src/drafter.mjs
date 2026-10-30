@@ -15,7 +15,10 @@ const forced = async (system, user, tool, use = {}) => {
     messages: [{ role: "user", content: user }],
   });
   const call = toolCall(res, tool.name);
-  if (!call) throw new Error("model returned no structured output");
+  if (!call) {
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+    throw new Error(`model returned no structured output (stop ${res.stop_reason ?? "?"}${text ? `, ${text.length} chars of text instead` : ""})`);
+  }
   return call.input;
 };
 

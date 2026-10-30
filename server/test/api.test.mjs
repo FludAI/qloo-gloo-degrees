@@ -19,6 +19,7 @@ let fake, proc, calls = 0, ttsCalls = 0, reviewInstruction = null;
 
 // Fake Anthropic Messages API: one Qloo describe call, then a proposal with one real and one invented ID.
 let replyModel = "fake";
+let museStyle = "tool"; // how the fake Muse answers: "tool" (tool_calls), "text" (the call as fenced JSON in content parts), "cut" (finish_reason length, mid-thought)
 const reply = (content) => ({ id: "msg", type: "message", role: "assistant", model: replyModel, stop_reason: "tool_use", content, usage: { input_tokens: replyModel === "fake-muse" ? 7 : 10, output_tokens: replyModel === "fake-muse" ? 3 : 10 } });
 before(async () => {
   fake = createServer((req, res) => {
@@ -37,16 +38,21 @@ before(async () => {
         assert.ok(!JSON.stringify(parsed).includes("gloo_sid"), "nothing identifies the learner");
         assert.ok((parsed.tools ?? []).every((t) => t.type === "function" && t.function?.name && t.function.parameters), "tools in the function shape");
         assert.ok(!parsed.tool_choice || parsed.tool_choice === "auto", "auto is the only tool choice the API takes");
+        assert.ok(parsed.max_completion_tokens > 2500 && parsed.max_tokens === undefined, "the cap carries reasoning headroom, under its canonical name");
+        assert.ok(["minimal", "low", "medium", "high", "xhigh"].includes(parsed.reasoning_effort), "a reasoning effort is always set");
         assert.ok(parsed.messages.every((m) => m.role !== "tool" || m.tool_call_id), "tool results carry their call id");
         const sys = parsed.messages.find((m) => m.role === "system");
         parsed = { ...parsed, system: sys?.content ?? "", tools: (parsed.tools ?? []).map((t) => ({ name: t.function.name, input_schema: t.function.parameters })), tool_choice: { type: "auto" },
           messages: parsed.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "tool" ? "user" : m.role,
             content: typeof m.content === "string" || m.content == null ? m.content ?? "" : m.content.map((b) => (b.type === "image_url" ? { type: "image", url: b.image_url.url } : { type: "text", text: b.text })) })) };
         const end = res.end.bind(res);
-        res.end = (out) => { const a = JSON.parse(out); end(JSON.stringify({ id: a.id, object: "chat.completion", model: a.model, choices: [{ index: 0, finish_reason: "tool_calls",
-          message: { role: "assistant", content: a.content.filter((b) => b.type === "text").map((b) => b.text).join("") || null,
-            tool_calls: a.content.filter((b) => b.type === "tool_use").map((b) => ({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } })) } }],
-          usage: { prompt_tokens: a.usage.input_tokens, completion_tokens: a.usage.output_tokens, total_tokens: a.usage.input_tokens + a.usage.output_tokens } })); };
+        res.end = (out) => { const a = JSON.parse(out);
+          const calls = a.content.filter((b) => b.type === "tool_use"), text = a.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+          const message = museStyle === "text" && calls[0] ? { role: "assistant", content: [{ type: "text", text: "Here is the lesson:\n```json\n" + JSON.stringify(calls[0].input) + "\n```" }] }
+            : museStyle === "cut" ? { role: "assistant", content: "Let me think about this carefully. The term" }
+            : { role: "assistant", content: text || null, tool_calls: calls.map((b) => ({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } })) };
+          end(JSON.stringify({ id: a.id, object: "chat.completion", model: a.model, choices: [{ index: 0, finish_reason: museStyle === "cut" ? "length" : museStyle === "text" ? "stop" : "tool_calls", message }],
+            usage: { prompt_tokens: a.usage.input_tokens, completion_tokens: a.usage.output_tokens, total_tokens: a.usage.input_tokens + a.usage.output_tokens, completion_tokens_details: { reasoning_tokens: museStyle === "cut" ? 2500 : 2 } } })); };
       }
       if (req.url === "/tts") {
         // Fake Text-to-Speech: echoes the SSML it was sent as the "audio", so the test can read what was said;
@@ -529,7 +535,7 @@ test("degree 2: a new word's pick cards are built from Qloo: more candidates ask
   assert.equal(body.created, true);
   await s("POST", `/api/terms/${body.term_id}/first-attempt`, { skipped: true });
   const term = (await s("GET", `/api/terms/${body.term_id}`)).body;
-  assert.deepEqual(term.cards, { source: "qloo", describes: 9, skipped: 0, cap: 40, floor: 0.3 });
+  assert.deepEqual(term.cards, { source: "qloo", describes: 9, skipped: 0, unasked: 0, cap: 40, floor: 0.3 });
   const role = term.roles.find((r) => r.id === "peri");
   assert.equal(role.pick.built.source, "qloo"); assert.equal(role.pick.built.candidates, 9);
   const kept = role.pick.options.filter((o) => o.qloo?.entity_id);
@@ -663,6 +669,35 @@ test("model arm: ?model=muse sends the camera read, the drafter, the hearing fix
   assert.ok(t.rows.some((row) => row.reads.ok >= 1 && row.level === 3));
   const h = (await s("GET", "/api/health")).body;
   assert.deepEqual(h.agent.available, { anthropic: true, muse: true }); assert.equal(h.agent.models.muse, "muse-spark-1.3");
+});
+
+test("muse quirks: a tool call written as JSON text still drafts the lesson (the row notes it); an answer cut at the cap fails cleanly with the cut on its row and in the report", async () => {
+  try {
+    // The first live Muse draft: the model answered, the drafter saw no tool call. Written as text, the call is read out of the text.
+    museStyle = "text";
+    const s = session();
+    assert.equal((await s("GET", "/api/level?model=muse")).body.model.arm, "muse");
+    const drafted = (await s("POST", "/api/glue", { text: "zzqxv", mode: "typed" })).body;
+    assert.equal(drafted.created, true, JSON.stringify(drafted));
+    await s("POST", `/api/terms/${drafted.term_id}/first-attempt`, { skipped: true });
+    const term = (await s("GET", `/api/terms/${drafted.term_id}`)).body;
+    assert.equal(term.title, "Peristalsis"); assert.ok(term.roles.length >= 2, "the lesson came through the text");
+    const rows = (await s("GET", "/api/export")).body.provider_calls.filter((c) => c.provider === "muse");
+    assert.deepEqual(rows.map((c) => [c.op, c.status, c.stop, c.note]).sort(), [["draft_lesson", "ok", "end_turn", "tool_from_text"], ["resolve_term", "ok", "end_turn", "tool_from_text"]]);
+    // Cut at the cap mid-thought (what happened live): no lesson, the credit back, and the row says the answer was cut with no tool.
+    museStyle = "cut";
+    const c = session();
+    await c("GET", "/api/level?model=muse");
+    const cut = await c("POST", "/api/glue", { text: "zzqxv", mode: "typed" });
+    assert.equal(cut.status, 502); assert.match(cut.body.error, /Couldn't draft a lesson/);
+    const crow = (await c("GET", "/api/export")).body.provider_calls.find((x) => x.op === "draft_lesson");
+    assert.deepEqual([crow.provider, crow.status, crow.stop, crow.note, crow.tokens_out], ["muse", "ok", "max_tokens", "no_tool", 3]);
+    const r = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+    const muse = r.models.find((m) => m.arm === "muse");
+    assert.ok(muse.model_cut >= 2 && muse.text_tools >= 2, JSON.stringify([muse.model_cut, muse.text_tools]));
+    const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
+    assert.match(text, /cut\/text/);
+  } finally { museStyle = "tool"; }
 });
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {

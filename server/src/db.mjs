@@ -49,6 +49,9 @@ CREATE INDEX IF NOT EXISTS learner_nodes_sid ON learner_nodes (sid, created_at);
 CREATE TABLE IF NOT EXISTS learner_embeddings (
   id INTEGER PRIMARY KEY, sid TEXT NOT NULL, nodes INTEGER NOT NULL, dims INTEGER NOT NULL, vector TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS learner_briefs (sid TEXT PRIMARY KEY, text TEXT NOT NULL, facts TEXT NOT NULL, nodes INTEGER NOT NULL, chars INTEGER NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS card_fits (
+  sid TEXT NOT NULL, term_id TEXT NOT NULL, role TEXT NOT NULL, qloo_top TEXT, judge_top TEXT, top_hit INTEGER NOT NULL, rho REAL, fits TEXT NOT NULL,
+  provider TEXT, model TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (sid, term_id, role));
 CREATE TABLE IF NOT EXISTS provider_calls (
   id INTEGER PRIMARY KEY, sid TEXT, provider TEXT NOT NULL, op TEXT NOT NULL, status TEXT NOT NULL, cache TEXT, duration_ms REAL, created_at INTEGER NOT NULL);
 `);
@@ -135,7 +138,10 @@ export const q = {
   putOffer: db.prepare("INSERT OR REPLACE INTO pick_offers (sid, term_id, role, tailored, options, signals, at, build_ms, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   getOffer: db.prepare("SELECT tailored, options, signals, at FROM pick_offers WHERE sid = ? AND term_id = ? AND role = ?"),
   hooksFor: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND term_id = ? AND removed_at IS NULL AND source = 'pick' GROUP BY hook_source"),
-  hooksAll: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick' GROUP BY hook_source"),
+  // A seeded like (hook_source 'seed': a simulated learner's canon taste, put in before the first word) is a taste signal, never a hook.
+  hooksAll: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick' AND COALESCE(hook_source, '') != 'seed' GROUP BY hook_source"),
+  seedsFor: db.prepare("SELECT label, qloo_type, qloo_entity_id FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND hook_source = 'seed' ORDER BY created_at"),
+  putFit: db.prepare("INSERT OR REPLACE INTO card_fits (sid, term_id, role, qloo_top, judge_top, top_hit, rho, fits, provider, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   editCue: db.prepare("UPDATE learner_cues SET connection = ? WHERE id = ? AND sid = ? AND removed_at IS NULL"),
   removeCue: db.prepare("UPDATE learner_cues SET removed_at = ? WHERE id = ? AND sid = ?"),
   logCall: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
@@ -149,13 +155,13 @@ export function exportLearner(sid) {
   const all = (t) => db.prepare(`SELECT * FROM ${t} WHERE sid = ?`).all(sid);
   return { first_attempts: all("first_attempts"), attempts: all("attempts"), learner_cues: all("learner_cues"),
     provisional_terms: all("provisional_terms"), resolutions: all("resolutions"), provider_calls: all("provider_calls"), pick_offers: all("pick_offers"),
-    learner_nodes: all("learner_nodes"), learner_embeddings: all("learner_embeddings"), learner_briefs: all("learner_briefs") };
+    learner_nodes: all("learner_nodes"), learner_embeddings: all("learner_embeddings"), learner_briefs: all("learner_briefs"), card_fits: all("card_fits") };
 }
 
 export function deleteLearner(sid) {
   db.exec("BEGIN");
   try {
-    for (const t of ["first_attempts", "attempts", "hint_exposures", "learner_cues", "provisional_terms", "resolutions", "provider_calls", "pick_offers", "learner_nodes", "learner_embeddings", "learner_briefs", "learners"]) {
+    for (const t of ["first_attempts", "attempts", "hint_exposures", "learner_cues", "provisional_terms", "resolutions", "provider_calls", "pick_offers", "learner_nodes", "learner_embeddings", "learner_briefs", "card_fits", "learners"]) {
       db.prepare(`DELETE FROM ${t} WHERE sid = ?`).run(sid);
     }
     db.exec("COMMIT");

@@ -38,7 +38,7 @@ bucket, and `MEDIA_PREFIX=degrees/` keeps every object it writes apart from prod
 gcloud run deploy qloo-gloo-degrees --source . --region $REGION \
   --allow-unauthenticated \
   --set-secrets QLOO_API_KEY=qloo-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_TOKEN=gloo-admin-token:latest,META_API_KEY=meta-api-key:latest \
-  --update-env-vars CREDITS_WELCOME=20,PUBLIC_URL=https://qloo.gloo.news,MEDIA_PREFIX=degrees/,TASTE_MIN_PICKS=1 \
+  --update-env-vars CREDITS_WELCOME=20,PUBLIC_URL=https://qloo.gloo.news,MEDIA_PREFIX=degrees/,TASTE_MIN_PICKS=1,LIMIT_QLOO_GLOBAL_DAY=600 \
   --min-instances 1 --max-instances 1 --session-affinity \
   --memory 1Gi --cpu 1 --timeout 120
 ```
@@ -157,7 +157,8 @@ Environment variables (defaults shown):
 | `LIMIT_AGENT_PER_SESSION_HOUR` | `8` | Agent runs per browser session per hour |
 | `LIMIT_AGENT_GLOBAL_DAY` | `300` | Agent runs per day across all visitors |
 | `LIMIT_QLOO_PER_SESSION_HOUR` | `60` | Qloo calls per session per hour (cache hits are free) |
-| `LIMIT_QLOO_GLOBAL_DAY` | `150` | Qloo calls per day across all visitors (cache hits are free; cached answers persist in SQLite for `QLOO_CACHE_TTL_HOURS`, default 168) |
+| `LIMIT_QLOO_GLOBAL_DAY` | `150` | Qloo calls per day across all visitors (cache hits are free; cached answers persist in SQLite for `QLOO_CACHE_TTL_HOURS`, default 168); the degrees service runs with `600`, since two persona runs nearly spent `150` |
+| `LIMIT_QLOO_PER_SESSION_HOUR_SYNTHETIC` | `200` | The hourly Qloo cap of a synthetic (simulated) session, which plays several words in minutes; the daily cap is shared. The degrees report counts cards a cap left editorial (`limited`) |
 | `LIMIT_STT_PER_SESSION_HOUR` | `40` | Transcriptions per session per hour |
 | `LIMIT_CAMERA_PER_SESSION_HOUR` | `40` | Camera reads per session per hour |
 | `LIMIT_TTS_PER_SESSION_HOUR` | `60` | New clips synthesized per session per hour (stored clips are free) |
@@ -188,7 +189,7 @@ Environment variables (defaults shown):
 | `META_REASONING_EFFORT` / `META_REASONING_HEADROOM` | `low` / `6000` | Muse Spark always reasons and its reasoning tokens count against the output cap: every muse request sets this effort (unless the task asks for one) and adds this many tokens to its cap. A call that still comes back cut, or that writes its tool call as text, is marked on its row (`stop`, `note`) and counted in the degrees report (`cut/text`) |
 | `SNAPSHOT` / `SNAPSHOT_EVERY_MS` | on when `DB_PATH` is a file / `300000` | Database snapshots to the media store (above); `SNAPSHOT=0` turns them off. `SNAPSHOT_SHUTDOWN_MS` (7000) bounds the SIGTERM snapshot, `SNAPSHOT_RECHECK_MS` (90000) the sidecar re-check after boot |
 | `BRIEF` / `BRIEF_MAX_CHARS` | on / `700` | The learner brief (`server/src/brief.mjs`): one paragraph per learner from their words, hooks, taste tags and last practice answers (public names and lesson titles only), kept in `learner_briefs` and recomputed after a draft, a first attempt, a pick and each answer. The level 3 agent and the drafter read it; `BRIEF=0` keeps computing it but no prompt reads it. Every model row records the characters carried (`brief`), the degrees report splits draft acceptance with and without one |
-| `SIM_TOKEN` | unset | The simulator's token (`scripts/simulate-learner.mjs`, secret `gloo-sim-token`): a request with `x-gloo-sim-token` equal to it may mark its session a synthetic learner (`x-gloo-synthetic: <persona>`) and ask the arm judge (`POST /api/sim/judge`). Unset = nothing can be marked. Both reports keep synthetic rows out of the real tables and funnel unless `?include=synthetic` |
+| `SIM_TOKEN` | unset | The simulator's token (`scripts/simulate-learner.mjs`, secret `gloo-sim-token`): a request with `x-gloo-sim-token` equal to it may mark its session a synthetic learner (`x-gloo-synthetic: <persona>`), seed the persona's canon likes as taste signals (`POST /api/sim/seed`; kept as cues with `hook_source` `seed`, never counted as hooks), ask the arm judge (`POST /api/sim/judge`) and the canon-fit judge (`POST /api/sim/fit`: Qloo's order of a ranked card against a model's canon fit, rolled up as `fidelity`). Unset = nothing can be marked. Both reports keep synthetic rows out of the real tables and funnel unless `?include=synthetic` |
 | `SIM_JUDGE_PROVIDER` | `anthropic` | The model arm the arm judge scores hooks with (0-3 sound match, on the cue row; "judged by a model" in the degrees report) unless the request names one |
 | `MODEL_ARMS` | the keyed providers | Which model arms a new session may draw (`anthropic,muse`); `?model=muse` on any URL forces one for that session; `GET /api/level` reads it under `model`; the degrees report splits every outcome by arm |
 

@@ -18,7 +18,9 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
   const real = everyone.filter((l) => !l.synthetic), simulated = everyone.filter((l) => l.synthetic);
   const learners = include ? everyone : real;
   const offers = db.prepare("SELECT term_id, role, tailored, options, at, build_ms, reason FROM pick_offers WHERE sid = ?");
-  const picks = db.prepare("SELECT term_id, role, label, hook_source, shown_rank, created_at, judge_score FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick'");
+  const picks = db.prepare("SELECT term_id, role, label, hook_source, shown_rank, created_at, judge_score FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick' AND COALESCE(hook_source, '') != 'seed'");
+  const seeds = db.prepare("SELECT COUNT(*) AS n FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND hook_source = 'seed'");
+  const fits = db.prepare("SELECT top_hit, rho FROM card_fits WHERE sid = ?");
   const attempts = db.prepare("SELECT outcome, independent FROM attempts WHERE sid = ?");
   const calls = db.prepare("SELECT provider, op, status, cache, duration_ms, model, tokens_in, tokens_out, fallback_from, stop, note FROM provider_calls WHERE sid = ?");
   const drafts = db.prepare("SELECT id, created_at FROM provisional_terms WHERE sid = ? ORDER BY created_at, rowid");
@@ -30,7 +32,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
 
   // ---- One learner's numbers, computed once, then added to each grouping it belongs to. ----
   const statsOf = (sid) => {
-    const s = { cards: 0, tailored_cards: 0, unrankable_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
+    const s = { cards: 0, tailored_cards: 0, unrankable_cards: 0, limited_cards: 0, seeds: 0, fit_cards: 0, fit_hits: 0, rho_sum: 0, rho_n: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
       answers: 0, correct: 0, independent: 0, recall: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
       qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, no_cards: 0, drafted_briefed: 0, accepted_briefed: 0, drafted_plain: 0, accepted_plain: 0, tokens_in: 0, tokens_out: 0,
       build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) };
@@ -38,6 +40,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
     const pickAt = new Map(p.map((x) => [`${x.term_id}|${x.role}`, x]));
     for (const card of o) {
       s.cards++; if (card.tailored) s.tailored_cards++; if (card.reason === "one entity") s.unrankable_cards++; // no two names of one type: nothing for rank to compare
+      if (card.reason === "DEMO_RATE_LIMIT" || card.reason === "budget") s.limited_cards++; // left editorial by the session's or the day's Qloo cap
       const tiles = safeJson(card.options).slice(0, 4);
       s.tiles += tiles.length; s.pictured_tiles += tiles.filter(pictured).length;
       if (Number.isFinite(card.build_ms)) s.build_ms.push(card.build_ms);
@@ -48,6 +51,8 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
     for (const x of p) { s.picks++; if (x.shown_rank === 0) s.first_tile_picks++; if (x.hook_source === "taste") s.taste_picks++; if (x.hook_source === "own") s.own_picks++; if (x.hook_source === "agent") s.agent_picks++;
       if (Number.isInteger(x.judge_score)) { s.judged++; s.sound_sum += x.judge_score; } }
     for (const x of a) { s.answers++; if (x.outcome === "correct") { s.correct++; if (x.independent) { s.independent++; s.recall = 1; } } }
+    s.seeds = seeds.get(sid)?.n ?? 0;
+    for (const f of fits.all(sid)) { s.fit_cards++; s.fit_hits += f.top_hit; if (f.rho != null) { s.rho_sum += f.rho; s.rho_n++; } }
     const pickedTerms = new Set(p.map((x) => x.term_id));
     s.drafted_words = d.length; s.accepted_drafts = d.filter((x) => pickedTerms.has(x.id)).length; // a draft the learner went on to pick a hook in
     // Which drafts carried a learner brief: the n-th stored draft is the n-th draft call that produced one (same order, same session).
@@ -67,7 +72,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
     }
     return s;
   };
-  const blank = (extra) => ({ ...extra, sessions: 0, forced: 0, cards: 0, tailored_cards: 0, unrankable_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
+  const blank = (extra) => ({ ...extra, sessions: 0, forced: 0, cards: 0, tailored_cards: 0, unrankable_cards: 0, limited_cards: 0, seeds: 0, fit_cards: 0, fit_hits: 0, rho_sum: 0, rho_n: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
     answers: 0, correct: 0, independent: 0, recall_sessions: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
     qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, no_cards: 0, drafted_briefed: 0, accepted_briefed: 0, drafted_plain: 0, accepted_plain: 0, tokens_in: 0, tokens_out: 0,
     build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) });
@@ -83,6 +88,8 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
   const finish = ({ build_ms, pick_ms, ms, ...g }) => ({
     ...g,
     sound_match: g.judged ? Number((g.sound_sum / g.judged).toFixed(2)) : null, // mean 0-3 over the hooks a model judged (judge.mjs)
+    // Fidelity (the simulator): over ranked cards a model judged from canon, how often Qloo's top name was one the judge rated highest, and the mean rank agreement.
+    fidelity: rate(g.fit_hits, g.fit_cards), fidelity_rho: g.rho_n ? Number((g.rho_sum / g.rho_n).toFixed(2)) : null,
     rates: { first_tile: rate(g.first_tile_picks, g.picks), picture: rate(g.pictured_tiles, g.tiles), skip: rate(g.skipped_cards, g.cards),
       practice_correct: rate(g.correct, g.answers), independent: rate(g.independent, g.answers), recall_sessions: rate(g.recall_sessions, g.sessions),
       taste_picks: rate(g.taste_picks, g.picks), read_ok: rate(g.reads_ok, g.reads_tried), draft_ok: rate(g.drafts_ok, g.drafts_tried), draft_accepted: rate(g.accepted_drafts, g.drafted_words),
@@ -147,11 +154,14 @@ export function degreesText(report) {
   const cellRows = report.cells.map((g) => [g.level ?? "?", g.arm, sessions(g), String(g.cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.independent), String(g.drafted_words), String(g.agent_picks)]);
   const syn = report.synthetic ?? { sessions: 0, personas: [] };
   const score = (g) => (g.sound_match == null ? "-" : `${g.sound_match} (${g.judged})`);
-  const personaRows = (syn.personas ?? []).map((g) => [g.persona, g.level ?? "?", g.arm, String(g.sessions), String(g.cards), String(g.tailored_cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.drafted_words), String(g.agent_picks), String(g.qloo_calls), `${g.tokens_in}/${g.tokens_out}`, score(g)]);
+  const fidelity = (g) => (g.fit_cards ? `${pct(g.fidelity)} rho ${g.fidelity_rho ?? "-"} (${g.fit_cards})` : "-");
+  const personaRows = (syn.personas ?? []).map((g) => [g.persona, g.level ?? "?", g.arm, String(g.sessions), String(g.seeds), String(g.cards), String(g.tailored_cards), String(g.limited_cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.drafted_words), String(g.agent_picks), String(g.qloo_calls), `${g.tokens_in}/${g.tokens_out}`, score(g), fidelity(g)]);
+  const fidelityRows = [...(report.cells ?? []), ...(syn.cells ?? [])].filter((g) => g.fit_cards).map((g) => [g.level ?? "?", g.arm, String(g.sessions), String(g.fit_cards), pct(g.fidelity), String(g.fidelity_rho ?? "-")]);
   const synthetic = !syn.sessions ? [] : [
     "", report.include_synthetic ? `synthetic learners (${syn.sessions} simulated sessions, merged into the tables above with ?include=synthetic)` : `synthetic learners (${syn.sessions} simulated sessions, kept out of the tables above; ?include=synthetic merges them)`,
-    ...table(["persona", "level", "arm", "sessions", "cards", "tailored", "1st-tile", "pictures", "practice (scripted)", "drafts", "agent-picks", "qloo", "tokens in/out", "sound 0-3 (judged by a model)"], personaRows),
-    "practice (scripted): the simulator answers by rule, so correct means the rubric matched, never that anyone remembered; sound: mean sound-match score of the hooks a model judged (count), 0 a shared first letter only, 3 the name says the part"];
+    ...table(["persona", "level", "arm", "sessions", "seeds", "cards", "tailored", "limited", "1st-tile", "pictures", "practice (scripted)", "drafts", "agent-picks", "qloo", "tokens in/out", "sound 0-3 (judged by a model)", "fidelity (judged by a model)"], personaRows),
+    "seeds: the persona's canon likes put in as taste signals before the first word (never counted as hooks); limited: cards left editorial by a Qloo cap; practice (scripted): the simulator answers by rule, so correct means the rubric matched, never that anyone remembered; sound: mean sound-match score of the hooks a model judged (count), 0 a shared first letter only, 3 the name says the part; fidelity: over ranked cards a model judged from the persona's canon, how often Qloo's top name was one the judge rated highest, then Spearman's rho between Qloo's order and the judge's (cards)",
+    ...(fidelityRows.length ? ["", "fidelity by degree and arm (judged by a model; synthetic sessions)", ...table(["level", "arm", "sessions", "judged cards", "qloo top agrees", "rho"], fidelityRows)] : [])];
   return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}${report.synthetic_sessions ? report.include_synthetic ? ` (${report.synthetic_sessions} synthetic included)` : ` real (+${report.synthetic_sessions} synthetic, below)` : ""}`, "", "by degree of Qloo",
     ...table(["level", "degree", "sessions", "cards", "tailored", "1-type", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"], levelRows),
     "", "by model arm",

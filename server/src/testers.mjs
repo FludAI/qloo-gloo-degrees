@@ -26,7 +26,7 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3, include = 
     const reads = c.filter((x) => ["anthropic", "muse"].includes(x.provider) && x.op === "read_word");
     const readOk = reads.filter((x) => x.status === "ok").length;
     const captures = { camera: r.filter((x) => x.mode === "camera").length, voice: r.filter((x) => x.mode === "voice").length, typed: r.filter((x) => x.mode === "typed").length };
-    const picks = cu.filter((x) => x.source === "pick");
+    const picks = cu.filter((x) => x.source === "pick" && x.hook_source !== "seed");
     const correct = a.filter((x) => x.outcome === "correct").length, independent = a.filter((x) => x.outcome === "correct" && x.independent).length;
     const errors = c.filter((x) => x.status === "error").map((x) => `${x.provider}:${x.op}`);
     const stage = correct ? "correct" : a.length ? "practice" : picks.length ? "pick" : f.length ? "lesson" : readOk || r.some((x) => x.term_id || x.decision) ? "read" : live ? "gate" : "visited";

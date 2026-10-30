@@ -2,6 +2,7 @@
 const WINDOW_MS = 60 * 60e3;
 const LIMITS = {
   qloo: Number(process.env.LIMIT_QLOO_PER_SESSION_HOUR ?? 60),
+  qloo_synthetic: Number(process.env.LIMIT_QLOO_PER_SESSION_HOUR_SYNTHETIC ?? 200), // a simulated learner plays several words in minutes (scripts/simulate-learner.mjs)
   agent: Number(process.env.LIMIT_AGENT_PER_SESSION_HOUR ?? 8),
   agent_global: Number(process.env.LIMIT_AGENT_GLOBAL_DAY ?? 300),
   qloo_global: Number(process.env.LIMIT_QLOO_GLOBAL_DAY ?? 150),
@@ -21,7 +22,9 @@ export function remaining(kind) {
   return Math.max(0, LIMITS.qloo_global - globalQloo.n);
 }
 
-export function take(kind, sid) {
+export const caps = () => ({ ...LIMITS });
+// `synthetic`: the session is a simulated learner, whose hourly Qloo cap is its own; the daily cap is shared.
+export function take(kind, sid, { synthetic = false } = {}) {
   if (kind === "qloo") {
     // Event credits are finite: a hard daily cap across all visitors (cache hits never reach here).
     const today = new Date().toDateString();
@@ -36,7 +39,8 @@ export function take(kind, sid) {
   const key = `${kind}:${sid}`;
   const now = Date.now();
   const hits = (buckets.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (hits.length >= LIMITS[kind]) return { ok: false, reason: `Hourly ${kind} limit reached for this session. Try again later; learning still works.` };
+  const cap = kind === "qloo" && synthetic ? LIMITS.qloo_synthetic : LIMITS[kind];
+  if (hits.length >= cap) return { ok: false, reason: `Hourly ${kind} limit reached for this session. Try again later; learning still works.` };
   hits.push(now);
   buckets.set(key, hits);
   if (kind === "agent") globalAgent.n++;

@@ -66,7 +66,14 @@ before(async () => {
         return res.end(JSON.stringify({ audioContent: Buffer.from(`MP3|${parsed.voice?.name}|${parsed.input?.ssml}`).toString("base64"), timepoints: names.map((n, i) => ({ markName: n, timeSeconds: 0.25 * i })) }));
       }
       const offered = (parsed.tools ?? []).map((t) => t.name);
-      const forcedTool = ["resolve_term", "draft_lesson", "read_word", "suggest_field", "review_lesson", "judge_hook"].find((n) => offered.includes(n));
+      const forcedTool = ["resolve_term", "draft_lesson", "read_word", "suggest_field", "review_lesson", "judge_hook", "judge_fit"].find((n) => offered.includes(n));
+      if (forcedTool === "judge_fit") {
+        res.setHeader("content-type", "application/json");
+        const user = String(parsed.messages?.[0]?.content ?? "");
+        assert.match(user, /^Character: .+\nCanon likes: /); assert.ok(!user.includes("gloo_sid"));
+        const names = (/Names on the card: (.+)$/m.exec(user)?.[1] ?? "").split("; ");
+        return res.end(JSON.stringify(reply([{ type: "tool_use", id: "f1", name: "judge_fit", input: { fits: names.map((name) => ({ name, fit: /Pepsi|Penguin/.test(name) ? 3 : 1 })) } }])));
+      }
       res.setHeader("content-type", "application/json");
       if (forcedTool === "judge_hook") {
         // The arm judge: the hook name and the part reach the model, nothing else about the learner; Pepsi carries "chole" a little, anything else a lot.
@@ -857,7 +864,42 @@ test("synthetic learners: the mark needs the sim token, shows on /api/level and 
   const judged = d2.synthetic.personas.find((p) => p.persona === "marty-mcfly" && p.level === 2);
   assert.equal(judged.judged, 1); assert.equal(judged.sound_match, 1);
   assert.equal(two(d2).judged, 0, "the real cell was not judged");
-  assert.match(await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, admin)).text(), /\nmarty-mcfly +2 +anthropic .* 1 \(1\) *\n/);
+  assert.match(await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, admin)).text(), /\nmarty-mcfly +2 +anthropic .* 1 \(1\) */);
+  // Seeding: a fresh synthetic session's canon likes become taste signals before any word, each resolved once;
+  // they are cues with hook_source seed, never hooks, and the first card it opens is ranked for them.
+  const z = marked("sheldon-cooper", "test-sim-token");
+  await z("GET", "/api/level?qloo=1");
+  assert.equal((await session()("POST", "/api/sim/seed", { likes: [{ name: "Pepsi", type: "brand" }] })).status, 401);
+  const seeded = await z("POST", "/api/sim/seed", { likes: [{ name: "Pepsi", type: "brand" }, { name: "Twisted Sister", type: "artist" }, { name: "Halo", type: "video_game" }, { name: "Somewhere", type: "locality" }] });
+  assert.equal(seeded.status, 200, JSON.stringify(seeded.body));
+  assert.deepEqual(seeded.body.seeded, [{ name: "Pepsi", type: "brand", entity_id: "mock-pepsi" }, { name: "Twisted Sister", type: "artist", entity_id: "mock-twisted-sister" }, { name: "Halo", type: "videogame", entity_id: "mock-halo" }]);
+  assert.deepEqual(seeded.body.skipped, [{ name: "Somewhere", type: "locality", why: "type" }]); assert.equal(seeded.body.signals, 3);
+  assert.deepEqual((await z("POST", "/api/sim/seed", { likes: [{ name: "Pepsi", type: "brand" }] })).body.skipped[0].why, "already seeded");
+  assert.equal((await z("POST", "/api/sim/seed", { likes: [{ name: "someone@example.com", type: "brand" }] })).status, 400);
+  const zc = (await z("GET", "/api/export")).body.learner_cues;
+  assert.ok(zc.length === 3 && zc.every((c) => c.source === "pick" && c.hook_source === "seed" && c.term_id === "seed" && c.shown_rank === null));
+  assert.match((await (await fetch(`http://localhost:${PORT}/api/admin/learners/${(await z("GET", "/api/export")).body.provider_calls[0].sid}/brief`, admin)).json()).brief.text, /(Picks so far: Pepsi, Twisted Sister, Halo|Likes: )/, "the brief knows the seeded taste");
+  await z("POST", "/api/terms/cholecystokinin/first-attempt", { skipped: true });
+  const zt = (await z("GET", "/api/terms/cholecystokinin")).body;
+  assert.equal(zt.roles.find((r) => r.id === "in").pick.tailoring.source, "taste", "ranked before any pick on this lesson");
+  assert.deepEqual(zt.roles.find((r) => r.id === "chole").pick.options.map((o) => o.name), ["Pepsi-Cola", "RC Cola", "Inca Kola", "Coca-Cola"], "the seeded like leads its own card, the rest ranked by one call");
+  assert.equal((await z("GET", "/api/progress/cholecystokinin")).body.hooks.all.total, 0, "seeds are not hooks");
+  // The canon-fit judge on the ranked chole card: Qloo put Pepsi first, the fake judge rates Pepsi 3 and the rest 1, so they agree (rho 0.775 with the three-way tie).
+  const character = { name: "Sheldon Cooper", work: { title: "The Big Bang Theory", kind: "tv", year: 2007 } };
+  const likes = [{ name: "Pepsi", type: "brand" }, { name: "Twisted Sister", type: "artist" }];
+  assert.equal((await session()("POST", "/api/sim/fit", { term_id: "cholecystokinin", role: "in", character, likes })).status, 401);
+  assert.equal((await z("POST", "/api/sim/fit", { term_id: "cholecystokinin", role: "kin", character, likes })).body.status, "unranked");
+  const fit = await z("POST", "/api/sim/fit", { term_id: "cholecystokinin", role: "chole", character, likes });
+  assert.equal(fit.status, 200, JSON.stringify(fit.body));
+  assert.deepEqual([fit.body.status, fit.body.qloo_top, fit.body.judge_top, fit.body.top_hit, fit.body.rho, fit.body.provider], ["ok", "Pepsi-Cola", ["Pepsi-Cola"], 1, 0.775, "anthropic"]);
+  assert.deepEqual(fit.body.fits.map((f) => [f.name, f.fit]), [["Pepsi-Cola", 3], ["RC Cola", 1], ["Inca Kola", 1], ["Coca-Cola", 1]]);
+  assert.equal((await z("GET", "/api/export")).body.card_fits.length, 1);
+  const d3 = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, admin)).json();
+  const sheldon = d3.synthetic.personas.find((p) => p.persona === "sheldon-cooper");
+  assert.deepEqual([sheldon.seeds, sheldon.picks, sheldon.fit_cards, sheldon.fidelity], [3, 0, 1, 1]); assert.ok(sheldon.fidelity_rho > 0.7 && sheldon.fidelity_rho < 0.8);
+  const t3 = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, admin)).text();
+  assert.match(t3, /fidelity \(judged by a model\)/); assert.match(t3, /\nsheldon-cooper +1 +anthropic +1 +3 .*100% rho 0\.7\d \(1\)/); assert.match(t3, /fidelity by degree and arm/);
+  await z("DELETE", "/api/learner");
 });
 
 test("the simulator's dry run against the mock server: a fixture persona plays two words at degree 2, the rows carry cards, favorite ranks, scripted practice and spend, the file is written, and the judge scores the picks when asked", async () => {
@@ -877,13 +919,15 @@ test("the simulator's dry run against the mock server: a fixture persona plays t
     assert.deepEqual([run.kind, run.persona, run.level, run.arm, run.synthetic, run.judge, run.dry_run], ["run", "marty-mcfly", 2, "anthropic", "marty-mcfly", "off", true]);
     assert.match(run.practice_rule, /taste-blind/);
     assert.deepEqual([cck.kind, cck.word, cck.term_id, cck.created], ["word", "cholecystokinin", "cholecystokinin", false]);
+    assert.deepEqual([run.seed.on, run.seed.asked, run.seed.seeded, run.seed.resolved, run.seed.signals], [true, 3, 3, 3, 3], "the likes went in first");
     const chole = cck.cards.find((c) => c.role === "chole");
-    assert.deepEqual([chole.favorite_rank, chole.chosen, chole.via, chole.hook_source, chole.entity_id, chole.ranked, chole.judge], [1, "Pepsi-Cola", "like", "editorial", "mock-pepsi", false, null]);
+    assert.deepEqual([chole.favorite_rank, chole.chosen, chole.via, chole.hook_source, chole.entity_id, chole.ranked, chole.qloo_top, chole.judge, chole.fit], [0, "Pepsi-Cola", "like", "taste", "mock-pepsi", true, "Pepsi-Cola", null, null], "the seeded like leads its card, so the favorite lands first");
     const cysto = cck.cards.find((c) => c.role === "cysto");
     assert.deepEqual([cysto.favorite_rank, cysto.chosen_rank, cysto.via], [null, 0, "first"], "no like on the card: the first tile");
     assert.ok(cck.cards.every((c) => typeof c.seconds.card === "number" && typeof c.seconds.pick === "number" && c.seconds.pick >= c.seconds.card));
     assert.ok(cck.practice.length >= 3 && cck.practice.every((p) => ["correct", "incorrect", "partial", "uncertain"].includes(p.outcome)), JSON.stringify(cck.practice));
-    assert.ok(cck.cards.slice(2).some((c) => c.ranked), "the cards still ahead come back ranked once two picks are in (the lesson reloads after each pick)");
+    assert.ok(cck.cards.slice(2).some((c) => c.ranked), "the cards still ahead come back ranked (the lesson reloads after each pick)");
+    assert.equal(summary.favorite_first, 1);
     assert.ok(cck.spend.qloo_calls >= 1 && cck.spend.model_calls === 0, JSON.stringify(cck.spend));
     assert.equal(cck.first_attempt, "say");
     assert.deepEqual([peri.word, peri.created, peri.built?.source], ["peristalsis", true, "qloo"], "a new word is drafted and its cards built at degree 2");
@@ -897,6 +941,13 @@ test("the simulator's dry run against the mock server: a fixture persona plays t
     const word = j.lines[1];
     assert.ok(word.cards.length >= 2 && word.cards.every((c) => c.judge?.score === 2 && c.judge.provider === "anthropic" && c.judge.model === "claude-sonnet-5-5"), JSON.stringify(word.cards.map((c) => c.judge)));
     assert.equal(j.summary.sound_match, 2); assert.equal(j.summary.judged, word.cards.length);
+    // Every ranked card was put to the canon-fit judge; the summary carries the fidelity.
+    const rankedCards = word.cards.filter((c) => c.ranked);
+    assert.ok(rankedCards.every((c) => c.fit && c.fit.top_hit != null && c.fit.qloo_top === c.qloo_top), JSON.stringify(word.cards.map((c) => [c.ranked, c.fit])));
+    assert.ok(word.cards.filter((c) => !c.ranked).every((c) => c.fit === null), "an unranked card is not put to the fit judge");
+    assert.equal(j.summary.fit_cards, rankedCards.length); assert.equal(j.summary.fidelity != null, rankedCards.length > 0);
+    const unseeded = await simulate(parseArgs(["--base", `http://localhost:${PORT}`, "--persona", "fixture:ferris-bueller", "--level", "1", "--words", "1", "--seed-likes", "off", "--dry-run", "--quiet"]));
+    assert.equal(unseeded.lines[0].seed.on, false); assert.equal(unseeded.lines[1].cards[0].ranked, false, "without seeds the first card is editorial");
     const d = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
     const ferris = d.synthetic.personas.find((p) => p.persona === "ferris-bueller");
     assert.equal(ferris.sound_match, 2); assert.equal(ferris.level, 1);

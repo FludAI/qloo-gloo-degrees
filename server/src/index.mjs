@@ -29,13 +29,13 @@ import { ttsMode, speaker, VOICE } from "./tts.mjs";
 import { media } from "./media.mjs";
 import { scorePieces, termPieces } from "./resolve/pieces.mjs";
 import { DOMAIN_TERMS } from "./resolve/domain-terms.mjs";
-import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, familiarFor, MIN_PICKS, RESERVE as TASTE_RESERVE } from "./taste.mjs";
+import { loadEntities, knownEntities, resolveEntity, tailorTerm, hookSourceFor, hooksSummary, signalsFor, familiarFor, MIN_PICKS, RESERVE as TASTE_RESERVE, TYPES as TASTE_TYPES } from "./taste.mjs";
 import { record as recordNode, learnerGraph } from "./graph.mjs";
 import * as credits from "./credits.mjs";
 import { levelFor, forceLevel, levelInfo, parseLevel, armFor, forceArm, parseArm } from "./level.mjs";
 import { availability as modelAvailability, MODELS } from "./providers.mjs";
 import { qlooCards, CANDIDATES } from "./cards.mjs";
-import { judgeHook, JUDGE_PROVIDER } from "./judge.mjs";
+import { judgeHook, judgeFit, agreement, JUDGE_PROVIDER } from "./judge.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -149,7 +149,7 @@ async function runQloo(sid, op, args) {
   if (pii) return blocked(`Blocked: input looks like it contains a ${pii}.`, "PERSONAL_DATA_BLOCKED", "Use public cultural names and concepts only.");
   const hit = !MOCK && cached(op, args);
   if (hit) { q.logCall.run(sid, "qloo", op, hit.status, "hit", 0, Date.now()); return { ...hit, cache: "hit" }; }
-  const lim = take("qloo", sid);
+  const lim = take("qloo", sid, { synthetic: Boolean(q.getLevel.get(sid)?.synthetic) }); // a simulated learner has its own hourly cap (limits.mjs)
   if (!lim.ok) return blocked(lim.reason, "DEMO_RATE_LIMIT", "Wait, or continue with editorial cues.");
   const t0 = performance.now();
   const envelope = MOCK ? mockQloo(op, args) : await callQloo(op, args);
@@ -699,6 +699,58 @@ app.post("/api/sim/judge", sim, wrap(async (req, res) => {
     return res.status(502).json({ status: "error", error: "The judge did not answer." }); }
   q.judgeCue.run(out.score, out.provider, out.model, out.reason, cue.id, req.sid);
   res.json({ status: "ok", cue_id: cue.id, label: cue.label, part: role.part ?? role.label, ...out });
+}));
+
+// Seeding, for the simulator: a persona's canon likes become this session's taste signals before its first word,
+// each resolved to its Qloo entity (the shared cache first, a describe otherwise) and kept as a pick cue with
+// hook_source 'seed', so the first card is ranked for the persona and the reports can tell a seed from a hook.
+const SEED_TYPES = { video_game: "videogame", tvshow: "tv_show", tv: "tv_show" };
+app.post("/api/sim/seed", sim, wrap(async (req, res) => {
+  const likes = (Array.isArray(req.body?.likes) ? req.body.likes : []).slice(0, 10)
+    .map((l) => ({ name: String(l?.name ?? "").trim().slice(0, 80), type: SEED_TYPES[String(l?.type ?? "")] ?? String(l?.type ?? "").trim() }));
+  if (!likes.length) return res.status(400).json({ error: "likes is required: [{ name, type }]" });
+  const pii = findPersonalData(likes.map((l) => l.name));
+  if (pii) return res.status(400).json({ error: `That looks like a ${pii}. Likes are public names.` });
+  const seeded = [], skipped = [];
+  for (const l of likes) {
+    if (!l.name || !TASTE_TYPES.has(l.type)) { skipped.push({ ...l, why: "type" }); continue; }
+    if (q.cueByLabel.get(req.sid, "seed", l.type, l.name)) { skipped.push({ ...l, why: "already seeded" }); continue; }
+    const entityId = await resolveEntity((op, args) => runQloo(req.sid, op, args), l.name, l.type);
+    q.addCue.run(req.sid, "seed", l.type, l.name, "A canon like of the persona, seeded before the first word.", "pick", entityId, l.type, 1, Date.now(), l.name, "seed", null);
+    recordNode(req.sid, "pick", entityId ?? l.name, l.name, { term_id: "seed", role: l.type, type: l.type, entity_id: entityId, hook_source: "seed", shown_rank: null });
+    seeded.push({ name: l.name, type: l.type, entity_id: entityId });
+  }
+  if (seeded.length) refreshBrief(req.sid);
+  res.json({ seeded, skipped, signals: signalsFor(req.sid).length, min_picks: MIN_PICKS });
+}));
+
+// The canon-fit judge (judge.mjs), for the simulator's fidelity measure: Qloo ordered this card from the seeded
+// likes; a model rates each name's fit to the character from the canon likes; the agreement is kept per card and
+// rolled up in the degrees report as fidelity, labelled judged by a model.
+app.post("/api/sim/fit", sim, wrap(async (req, res) => {
+  const t = termFor(req.sid, req.body?.term_id);
+  if (!t) return res.status(404).json({ error: "unknown term" });
+  const role = t.roles.find((r) => r.id === req.body?.role);
+  if (!role) return res.status(400).json({ error: "unknown role" });
+  const character = { name: String(req.body?.character?.name ?? "").trim().slice(0, 80), work: { title: String(req.body?.character?.work?.title ?? "").slice(0, 120), kind: String(req.body?.character?.work?.kind ?? "").slice(0, 8), year: Number(req.body?.character?.work?.year) || null } };
+  const likes = (Array.isArray(req.body?.likes) ? req.body.likes : []).slice(0, 10).map((l) => ({ name: String(l?.name ?? "").trim().slice(0, 80), type: String(l?.type ?? "").slice(0, 20) })).filter((l) => l.name);
+  if (!character.name) return res.status(400).json({ error: "character.name is required" });
+  const pii = findPersonalData([character.name, character.work.title, ...likes.map((l) => l.name)]);
+  if (pii) return res.status(400).json({ error: `That looks like a ${pii}.` });
+  const offer = q.getOffer.get(req.sid, t.id, role.id);
+  const shown = offer ? JSON.parse(offer.options) : [];
+  const ranked = shown.filter((o) => o.taste != null).map((o) => o.name);
+  if (!offer?.tailored || ranked.length < 2) return res.json({ status: "unranked", reason: offer ? "the card was not ranked for this session" : "no card offered yet", ranked });
+  if (agentMode() !== "live") return res.status(503).json({ status: "unavailable", error: "The judge needs a model, which isn't configured here." });
+  const provider = parseArm(req.body?.provider) ?? JUDGE_PROVIDER;
+  const t0 = performance.now();
+  let out;
+  try { out = await judgeFit({ character, likes, question: role.pick?.question ?? "", names: shown.map((o) => o.name), provider, sid: req.sid }); }
+  catch (e) { q.logModel.run(req.sid, e.provider ?? provider, "judge_fit", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0); console.error("judge_fit:", e.message);
+    return res.status(502).json({ status: "error", error: "The judge did not answer." }); }
+  const a = agreement(ranked, out.fits);
+  q.putFit.run(req.sid, t.id, role.id, ranked[0], a.judge_top.join("|"), a.top_hit, a.rho, JSON.stringify(out.fits), out.provider, out.model, Date.now());
+  res.json({ status: "ok", qloo_top: ranked[0], qloo_order: ranked, judge_top: a.judge_top, top_hit: a.top_hit, rho: a.rho, fits: out.fits, provider: out.provider, model: out.model });
 }));
 
 // The line a report opens with after a restore: the memory the rows come from spans a redeploy.

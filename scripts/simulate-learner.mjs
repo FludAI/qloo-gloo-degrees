@@ -8,6 +8,7 @@
 //
 // Flags: --base (default https://qloo.gloo.news) · --persona <file.json> | fixture:<slug> · --level 0..3 · --model anthropic|muse
 //        --words N (default: all the persona's words) · --arm-judge on|off (default off) · --judge-provider anthropic|muse
+//        --seed-likes on|off (default on: the persona's likes become the session's taste signals before the first word, so the first card is ranked for them)
 //        --first say|skip (the first attempt: say the word as spelled, or skip it; default say) · --out <dir> (default ~/gloo-notes/sim-runs)
 //        --dry-run (rows to stdout, no file unless --out is given, the judge off) · --quiet
 // Environment: SIM_TOKEN (required: the server accepts the synthetic mark only with it; never a flag), SIM_PASSCODE (a gated demo).
@@ -17,8 +18,10 @@
 // likes, else the first tile; at degree 3 with no match, asks the agent ("None of these") and picks a proposal
 // that matches a like, else the first tile; practices with a taste-blind rule: every prompt is answered once with
 // the lesson's own definition sentence, so synthetic practice rows measure the rubric, never retention, and no
-// outcome can depend on the hook picked. The run's rows go to one JSON lines file: a run line, a line per word, a
-// summary line.
+// outcome can depend on the hook picked. With the judge on, every ranked card is also put to the canon-fit judge
+// (POST /api/sim/fit): Qloo ordered the card from the seeded likes, a model rates each name's fit to the character
+// from the canon likes, and the agreement is the run's fidelity. The run's rows go to one JSON lines file: a run
+// line, a line per word, a summary line.
 import { readFileSync, mkdirSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +42,7 @@ const norm = (s) => String(s ?? "").toLowerCase().replace(/\(.*?\)/g, "").replac
 const nowS = (t0) => Number(((performance.now() - t0) / 1000).toFixed(2));
 
 export function parseArgs(argv) {
-  const o = { base: "https://qloo.gloo.news", persona: null, level: null, model: null, words: null, armJudge: false, judgeProvider: null, first: "say", out: null, dryRun: false, quiet: false };
+  const o = { base: "https://qloo.gloo.news", persona: null, level: null, model: null, words: null, armJudge: false, judgeProvider: null, first: "say", out: null, dryRun: false, quiet: false, seedLikes: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = argv[i + 1];
     if (a === "--base") { o.base = v; i++; } else if (a === "--persona") { o.persona = v; i++; }
@@ -47,6 +50,7 @@ export function parseArgs(argv) {
     else if (a === "--words") { o.words = Number(v); i++; } else if (a === "--arm-judge") { o.armJudge = v === "on"; i++; }
     else if (a === "--judge-provider") { o.judgeProvider = v; i++; } else if (a === "--first") { o.first = v === "skip" ? "skip" : "say"; i++; }
     else if (a === "--out") { o.out = v; i++; } else if (a === "--dry-run") o.dryRun = true; else if (a === "--quiet") o.quiet = true;
+    else if (a === "--seed-likes") { o.seedLikes = v !== "off"; i++; }
     else throw new Error(`unknown flag ${a}`);
   }
   if (!o.persona) throw new Error("--persona <file.json> or fixture:<slug> is required");
@@ -128,14 +132,22 @@ export async function simulate(opts, { log = console.error } = {}) {
     if (!u.body?.unlocked) throw new Error("the passcode did not unlock the session");
   }
   const judge = opts.armJudge && !opts.dryRun;
+  // The persona's canon likes go in first as taste signals (POST /api/sim/seed), so the first card is ranked for them.
+  let seed = { on: false, asked: 0, seeded: 0, skipped: [], signals: 0 };
+  if (opts.seedLikes && persona.likes.length) {
+    const r = await call("POST", "/api/sim/seed", { likes: persona.likes.map((l) => ({ name: l.name, type: l.type })) });
+    if (r.status !== 200) throw new Error(`seeding the likes failed: ${r.status} ${r.body?.error ?? ""}`);
+    seed = { on: true, asked: persona.likes.length, seeded: r.body.seeded.length, resolved: r.body.seeded.filter((s) => s.entity_id).length, skipped: r.body.skipped, signals: r.body.signals, min_picks: r.body.min_picks };
+  }
+  const character = { name: persona.name, work: persona.work };
   emit({ kind: "run", run: runId, at: new Date().toISOString(), base: opts.base, persona: persona.slug, name: persona.name, work: persona.work, words_source: persona.words_source ?? null,
     level: lvl, degree: level.body.degree, arm, level_forced: level.body.forced, arm_forced: level.body.model?.forced ?? null, synthetic: level.body.synthetic,
-    judge: judge ? (opts.judgeProvider ?? "server default") : "off", first_attempt: opts.first, practice_rule: "taste-blind: every prompt answered once with the lesson's definition; no memory model",
+    judge: judge ? (opts.judgeProvider ?? "server default") : "off", seed, first_attempt: opts.first, practice_rule: "taste-blind: every prompt answered once with the lesson's definition; no memory model",
     dry_run: opts.dryRun, server: { qloo: health.qloo?.mode ?? null, agent: health.agent?.mode ?? null, model: health.agent?.model ?? null } });
-  say(`run ${runId}: ${persona.name} at degree ${lvl} (${level.body.degree}), arm ${arm}${judge ? ", judged" : ""}`);
+  say(`run ${runId}: ${persona.name} at degree ${lvl} (${level.body.degree}), arm ${arm}${judge ? ", judged" : ""}${seed.on ? `, ${seed.seeded} of ${seed.asked} likes seeded (${seed.resolved} resolved)` : ""}`);
 
   const words = persona.words.slice(0, opts.words ?? persona.words.length);
-  const totals = { words: 0, drafted: 0, cards: 0, ranked_cards: 0, favorite_hits: 0, picks: 0, agent_asks: 0, answers: 0, correct: 0, judged: 0, sound_sum: 0, qloo_calls: 0, tokens: 0, errors: 0 };
+  const totals = { words: 0, drafted: 0, cards: 0, ranked_cards: 0, limited_cards: 0, favorite_hits: 0, favorite_first: 0, picks: 0, agent_asks: 0, answers: 0, correct: 0, judged: 0, sound_sum: 0, fit_cards: 0, fit_hits: 0, rho_sum: 0, rho_n: 0, qloo_calls: 0, tokens: 0, errors: 0 };
   for (const w of words) {
     const t0 = performance.now(), since = Date.now();
     const row = { kind: "word", run: runId, persona: persona.slug, level: lvl, arm, word: w.word, where: w.where ?? null, term_id: null, created: null, resolution: null, first_attempt: opts.first,
@@ -159,7 +171,9 @@ export async function simulate(opts, { log = console.error } = {}) {
         const fav = favoriteOn(options, persona.likes);
         const card = { role: role.id, part: role.part ?? null, sound_like: role.sound_like ?? null, ranked: role.pick.tailoring?.source === "taste", tailoring: role.pick.tailoring?.source ?? null, reason: role.pick.tailoring?.reason ?? null,
           built: role.pick.built?.source ?? null, options: options.length, pictured: options.filter((o) => o.image || o.wiki).length, names: options.slice(0, 8).map((o) => o.name),
-          favorite_rank: fav.rank, chosen: null, chosen_rank: null, via: null, hook_source: null, entity_id: null, judge: null, seconds: { card: tCard, pick: null } };
+          qloo_top: role.pick.tailoring?.source === "taste" ? options[0].name : null, qloo_order: options.filter((o) => o.taste != null).map((o) => [o.name, o.taste]),
+          favorite_rank: fav.rank, chosen: null, chosen_rank: null, via: null, hook_source: null, entity_id: null, judge: null, fit: null, seconds: { card: tCard, pick: null } };
+        if (card.reason === "DEMO_RATE_LIMIT" || card.reason === "budget") totals.limited_cards++;
         let choice = fav.option, via = fav.option ? "like" : "first";
         if (!choice && lvl >= 3) {
           // "None of these": the agent proposes; a proposal matching a like is picked through the agent.
@@ -176,11 +190,18 @@ export async function simulate(opts, { log = console.error } = {}) {
         const cue = (picked.body ?? []).find((c) => c.role === role.id && c.source === "pick");
         card.chosen = choice.name; card.chosen_rank = options.findIndex((o) => o.name === choice.name); if (card.chosen_rank < 0) card.chosen_rank = null;
         card.via = via; card.hook_source = cue?.hook_source ?? null; card.entity_id = cue?.qloo_entity_id ?? null; card.shown_rank = cue?.shown_rank ?? null;
-        totals.cards++; if (card.ranked) totals.ranked_cards++; if (fav.rank != null) totals.favorite_hits++; totals.picks++;
+        totals.cards++; if (card.ranked) totals.ranked_cards++; if (fav.rank != null) totals.favorite_hits++; if (fav.rank === 0) totals.favorite_first++; totals.picks++;
         if (judge) {
           const j = await call("POST", "/api/sim/judge", { term_id: row.term_id, role: role.id, label: choice.name, ...(opts.judgeProvider ? { provider: opts.judgeProvider } : {}) });
           card.judge = j.status === 200 ? { score: j.body.score, reason: j.body.reason, provider: j.body.provider, model: j.body.model } : { error: `${j.status} ${j.body?.error ?? j.body?.status ?? ""}`.trim() };
           if (j.status === 200) { totals.judged++; totals.sound_sum += j.body.score; }
+          // The fidelity question on a ranked card: Qloo's order against the canon judge's.
+          if (card.ranked) {
+            const f = await call("POST", "/api/sim/fit", { term_id: row.term_id, role: role.id, character, likes: persona.likes.map((l) => ({ name: l.name, type: l.type })), ...(opts.judgeProvider ? { provider: opts.judgeProvider } : {}) });
+            card.fit = f.status === 200 && f.body.status === "ok" ? { qloo_top: f.body.qloo_top, judge_top: f.body.judge_top, top_hit: f.body.top_hit, rho: f.body.rho, fits: f.body.fits, provider: f.body.provider, model: f.body.model }
+              : { error: `${f.status} ${f.body?.status ?? ""} ${f.body?.error ?? f.body?.reason ?? ""}`.trim() };
+            if (card.fit.top_hit != null) { totals.fit_cards++; totals.fit_hits += card.fit.top_hit; if (card.fit.rho != null) { totals.rho_sum += card.fit.rho; totals.rho_n++; } }
+          }
         }
         row.cards.push(card);
         // The lesson reloads after a pick, as the client does: the cards still ahead come back ranked with it.
@@ -207,9 +228,10 @@ export async function simulate(opts, { log = console.error } = {}) {
     emit(row);
     say(`  ${w.word}: ${row.term_id ?? "-"}${row.created ? " (drafted)" : ""} · ${row.cards.length} cards (${row.cards.filter((c) => c.ranked).length} ranked, ${row.cards.filter((c) => c.favorite_rank != null).length} with a like) · practice ${row.practice.filter((p) => p.outcome === "correct").length}/${row.practice.length} · qloo ${row.spend.qloo_calls} · tokens ${row.spend.tokens_in}/${row.spend.tokens_out} · ${row.seconds.done}s${row.errors.length ? ` · errors: ${row.errors.join("; ")}` : ""}`);
   }
-  const summary = { kind: "summary", run: runId, persona: persona.slug, level: lvl, arm, ...totals, sound_match: totals.judged ? Number((totals.sound_sum / totals.judged).toFixed(2)) : null, file };
+  const summary = { kind: "summary", run: runId, persona: persona.slug, level: lvl, arm, seeded: seed.seeded, ...totals, sound_match: totals.judged ? Number((totals.sound_sum / totals.judged).toFixed(2)) : null,
+    fidelity: totals.fit_cards ? Number((totals.fit_hits / totals.fit_cards).toFixed(3)) : null, fidelity_rho: totals.rho_n ? Number((totals.rho_sum / totals.rho_n).toFixed(2)) : null, file };
   emit(summary);
-  say(`done: ${totals.words} words, ${totals.cards} cards (${totals.ranked_cards} ranked, ${totals.favorite_hits} with a like), practice ${totals.correct}/${totals.answers} (scripted), qloo ${totals.qloo_calls}, tokens ${totals.tokens}${totals.judged ? `, sound match ${summary.sound_match} over ${totals.judged} judged` : ""}${file ? `\n${file}` : ""}`);
+  say(`done: ${totals.words} words, ${totals.cards} cards (${totals.ranked_cards} ranked, ${totals.limited_cards} limited, ${totals.favorite_hits} with a like, ${totals.favorite_first} first), practice ${totals.correct}/${totals.answers} (scripted), qloo ${totals.qloo_calls}, tokens ${totals.tokens}${totals.judged ? `, sound match ${summary.sound_match} over ${totals.judged} judged` : ""}${totals.fit_cards ? `, fidelity ${summary.fidelity} rho ${summary.fidelity_rho ?? "-"} over ${totals.fit_cards} ranked cards` : ""}${file ? `\n${file}` : ""}`);
   return { run: runId, file, lines, summary };
 }
 

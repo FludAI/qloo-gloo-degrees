@@ -26,4 +26,4 @@ COPY server/src server/src
 COPY --from=build /app/web/dist web/dist
 USER node
 EXPOSE 8080
-CMD ["node", "server/src/index.mjs"]
+CMD ["node", "server/src/boot.mjs"]

@@ -120,13 +120,31 @@ gcloud beta run domain-mappings describe --domain app.gloo.news --region $REGION
 
 ## Why one warm instance
 
-SQLite lives on the instance's `/tmp`, which Cloud Run keeps in memory and
-drops when the instance stops. Spoken clips and pictures are not affected: they
-live in the media bucket (above). `--min-instances 1 --max-instances 1` keeps a
-single warm instance so learner sessions persist for the judging window, and
-keeps all sessions on one database. A new revision starts with an empty
-database. For durable multi-instance hosting, move `server/src/db.mjs` to Cloud
-SQL for Postgres; the queries are plain SQL.
+SQLite lives on the instance's writable layer, which Cloud Run keeps in memory
+and drops when the instance stops. Spoken clips and pictures are not affected:
+they live in the media bucket (above). `--min-instances 1 --max-instances 1`
+keeps a single warm instance so learner sessions persist, and keeps all
+sessions on one database.
+
+The degrees service also keeps that database across redeploys
+(`server/src/snapshot.mjs`): every five minutes when it changed, and once more
+at SIGTERM, the file is copied with SQLite's online backup to the media bucket
+as `db/gloo.sqlite` under the service's `MEDIA_PREFIX`, with a sidecar
+`db/gloo.sqlite.json` (time, sha256, size, revision, row counts) and a dated copy
+once a day kept seven days. `server/src/boot.mjs` (the container's entry)
+restores the copy before the database opens when it is newer than the local
+file, after checking its sha256 and `PRAGMA integrity_check`; for 90 s after
+boot it re-checks the sidecar, so a snapshot written by the revision being
+replaced still lands as long as nothing was written here yet. Everything in
+the file comes along: learners and their degree and model arm, attempts and
+the practice schedule, picks, drafted lessons, the learner graph and briefs,
+the credits ledger, the Qloo cache, call rows. `/api/health` shows `memory`
+(the last snapshot, what boot restored from), and the testers and degrees
+reports open with the restore line. This assumes one instance: raise
+`--max-instances` and two instances would restore the same file and diverge,
+so set `SNAPSHOT=0` first. The loss window is one timer interval when the
+instance dies without SIGTERM. For durable multi-instance hosting, move
+`server/src/db.mjs` to Cloud SQL for Postgres; the queries are plain SQL.
 
 ## Cost and quota controls
 
@@ -166,6 +184,8 @@ Environment variables (defaults shown):
 | `META_API_KEY` | unset | Meta Model API key (secret `meta-api-key`), the second model backend (`server/src/providers.mjs`): Muse Spark through the API's chat-completions surface (`POST https://api.meta.ai/v1/chat/completions`). Unset = the muse arm reports unavailable and falls back to Claude, recorded on the call's row |
 | `META_MODEL` / `META_BASE_URL` | `muse-spark-1.3` / `https://api.meta.ai` | The Meta model (multimodal, tool calling) and where to reach it |
 | `META_REASONING_EFFORT` / `META_REASONING_HEADROOM` | `low` / `6000` | Muse Spark always reasons and its reasoning tokens count against the output cap: every muse request sets this effort (unless the task asks for one) and adds this many tokens to its cap. A call that still comes back cut, or that writes its tool call as text, is marked on its row (`stop`, `note`) and counted in the degrees report (`cut/text`) |
+| `SNAPSHOT` / `SNAPSHOT_EVERY_MS` | on when `DB_PATH` is a file / `300000` | Database snapshots to the media store (above); `SNAPSHOT=0` turns them off. `SNAPSHOT_SHUTDOWN_MS` (7000) bounds the SIGTERM snapshot, `SNAPSHOT_RECHECK_MS` (90000) the sidecar re-check after boot |
+| `BRIEF` / `BRIEF_MAX_CHARS` | on / `700` | The learner brief (`server/src/brief.mjs`): one paragraph per learner from their words, hooks, taste tags and last practice answers (public names and lesson titles only), kept in `learner_briefs` and recomputed after a draft, a first attempt, a pick and each answer. The level 3 agent and the drafter read it; `BRIEF=0` keeps computing it but no prompt reads it. Every model row records the characters carried (`brief`), the degrees report splits draft acceptance with and without one |
 | `MODEL_ARMS` | the keyed providers | Which model arms a new session may draw (`anthropic,muse`); `?model=muse` on any URL forces one for that session; `GET /api/level` reads it under `model`; the degrees report splits every outcome by arm |
 
 Set a budget alert on the Anthropic account too. Qloo hackathon keys expire

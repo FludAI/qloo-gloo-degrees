@@ -19,7 +19,8 @@ let fake, proc, calls = 0, ttsCalls = 0, reviewInstruction = null;
 
 // Fake Anthropic Messages API: one Qloo describe call, then a proposal with one real and one invented ID.
 let replyModel = "fake";
-let museStyle = "tool"; // how the fake Muse answers: "tool" (tool_calls), "text" (the call as fenced JSON in content parts), "cut" (finish_reason length, mid-thought)
+let museStyle = "tool";
+let lastDraft = null, lastAgent = null; // the last draft_lesson request and the last agent run's opening request, as the model saw them // how the fake Muse answers: "tool" (tool_calls), "text" (the call as fenced JSON in content parts), "cut" (finish_reason length, mid-thought)
 const reply = (content) => ({ id: "msg", type: "message", role: "assistant", model: replyModel, stop_reason: "tool_use", content, usage: { input_tokens: replyModel === "fake-muse" ? 7 : 10, output_tokens: replyModel === "fake-muse" ? 3 : 10 } });
 before(async () => {
   fake = createServer((req, res) => {
@@ -98,6 +99,7 @@ before(async () => {
         return res.end(JSON.stringify(reply([{ type: "tool_use", id: "r1", name: "resolve_term", input: { term: "Breyers", reason: "brand name" } }])));
       }
       if (forcedTool === "draft_lesson") {
+        lastDraft = { system: String(parsed.system), user: String(parsed.messages?.[0]?.content ?? "") };
         // Degree 2 asks for eight to twelve typed candidates per piece; the fake then names nine for "peri", one of them unknown to the mock graph.
         const many = String(parsed.system).includes("8 to 12");
         const tool = (parsed.tools ?? []).find((t) => t.name === "draft_lesson");
@@ -117,6 +119,7 @@ before(async () => {
           sources: [{ label: "bad", url: "javascript:alert(1)" }] } }])));
       }
       calls++;
+      if ((parsed.messages ?? []).length === 1) lastAgent = { system: String(parsed.system), user: String(parsed.messages[0].content ?? "") };
       // The first step of every agent run resolves Breyers; the next one proposes.
       const msg = (parsed.messages ?? []).length === 1
         ? reply([{ type: "tool_use", id: "t1", name: "qloo_describe", input: { entity: "Breyers", type: "brand" } }])
@@ -518,7 +521,7 @@ test("degrees: a session draws a level, ?qloo=N forces and sticks, level 0 suppr
   assert.ok(zero.sessions >= 1); assert.ok(zero.forced >= 1); assert.ok(zero.cards >= 4); assert.ok(zero.picks >= 1); assert.ok(zero.first_tile_picks >= 1);
   assert.ok(zero.skipped_cards >= 3); assert.equal(zero.qloo_calls, 0); assert.equal(typeof zero.median_build_ms, "number"); assert.equal(typeof zero.median_pick_ms, "number");
   assert.ok(zero.rates.first_tile > 0 && zero.rates.skip > 0); assert.ok(zero.tiles >= zero.cards * 2 && zero.tiles <= zero.cards * 4);
-  assert.deepEqual(Object.keys(zero.rates), ["first_tile", "picture", "skip", "practice_correct", "independent", "recall_sessions", "taste_picks", "read_ok", "draft_ok", "draft_accepted"]);
+  assert.deepEqual(Object.keys(zero.rates), ["first_tile", "picture", "skip", "practice_correct", "independent", "recall_sessions", "taste_picks", "read_ok", "draft_ok", "draft_accepted", "draft_accepted_briefed", "draft_accepted_plain"]);
   const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
   assert.match(text, /^sessions since /); assert.match(text, /\n0 +editorial /); assert.match(text, /\n3 +agent doorway /);
   // The testers report carries the level of each session.
@@ -698,6 +701,62 @@ test("muse quirks: a tool call written as JSON text still drafts the lesson (the
     const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
     assert.match(text, /cut\/text/);
   } finally { museStyle = "tool"; }
+});
+
+test("learner brief: built after a word, a pick and an answer; the drafter and the level 3 agent read it; the rows record its size; the report splits acceptance; nothing typed reaches it", async () => {
+  const s = session();
+  await s("GET", "/api/level?qloo=3");
+  // A fresh session's first draft carries no brief.
+  const first = (await s("POST", "/api/glue", { text: "zzqxv", mode: "typed" })).body;
+  assert.equal(first.created, true);
+  assert.doesNotMatch(lastDraft.user, /The learner so far/); assert.doesNotMatch(lastDraft.system, /domains they like/);
+  const sid = (await s("GET", "/api/export")).body.provider_calls[0].sid;
+  assert.match(sid, /^[a-f0-9]{32}$/);
+  const brief = async () => (await (await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/brief`, { headers: { "x-gloo-admin": "test-owner-token" } })).json()).brief;
+  assert.equal(await brief(), null, "no node yet, no brief");
+  // A reviewed word with a pick and an answer: the brief says what happened, in public names only.
+  await s("POST", "/api/terms/cholecystokinin/first-attempt", { response: "my spoken try xyzzy" });
+  assert.match((await brief()).text, /^Met 1 word: Cholecystokinin \(CCK\) \(started\)\.$/);
+  const cck = (await s("GET", "/api/terms/cholecystokinin")).body;
+  const o = cck.roles.find((r) => r.id === "chole").pick.options.find((x) => x.name === "Pepsi-Cola");
+  await s("POST", "/api/learner/cues", { term_id: "cholecystokinin", role: "chole", label: o.name, connection: o.connection, source: "pick", recognized: true, qloo_entity_type: o.qloo?.type });
+  assert.match((await brief()).text, /Hooks: untested: chole→Pepsi-Cola\./);
+  await s("POST", "/api/attempts", { prompt_id: "cck-chole", response: "bile plugh", idempotency_key: "brief-attempt-1" });
+  const b = await brief(); // the taste line depends on whether an earlier test tagged Pepsi in this server's cache
+  assert.match(b.text, /Met 1 word: Cholecystokinin \(CCK\) \(practiced, 1 of 1 right, recalled unaided\)\. Hooks: sound hook stuck: chole→Pepsi-Cola\. (?:Likes: [^.]+ \(brand\)|Picks so far: Pepsi-Cola \(brand\); taste tags not computed yet)\. Last answers: Cholecystokinin \(CCK\): meaning correct unaided at the now review\./);
+  assert.ok(!b.text.includes("xyzzy") && !b.text.includes("plugh") && !JSON.stringify(b.facts).includes("plugh"), "nothing typed or said");
+  assert.ok(b.chars <= 700 && b.nodes === 4);
+  // The next draft is told about the learner; its row records how much.
+  const second = (await s("POST", "/api/glue", { text: "peristalsis", mode: "typed" })).body;
+  assert.equal(second.created, true);
+  assert.match(lastDraft.user, /\nThe learner so far: Met 1 word: Cholecystokinin \(CCK\) \(practiced/); assert.match(lastDraft.system, /draw the pick names for each role from those domains first/);
+  const drafts = (await s("GET", "/api/export")).body.provider_calls.filter((c) => c.op === "draft_lesson");
+  assert.deepEqual(drafts.map((c) => c.brief), [0, b.chars]);
+  // The agent at degree 3 reads it beside the familiar list; every step's row and the run's row carry it.
+  await s("POST", "/api/terms/brier-score/first-attempt", { skipped: true });
+  const agent = (await s("POST", "/api/cues/agent", { term_id: "brier-score", familiar: ["Breyers"] })).body;
+  assert.equal(agent.status, "ok");
+  assert.match(lastAgent.user, /^Things I already know and like: "Breyers"\.\nAbout me so far: Met 2 words: Brier score \(first attempt skipped\); Cholecystokinin \(CCK\) \(practiced/);
+  assert.match(lastAgent.system, /5\. When the learner's note \("About me so far"\) names domains they like/);
+  const rows = (await s("GET", "/api/export")).body.provider_calls.filter((c) => c.op.startsWith("cue_agent"));
+  assert.ok(rows.length >= 3 && rows.every((c) => c.brief > 0 && c.note === null), JSON.stringify(rows.map((c) => [c.op, c.brief, c.note])));
+  // The report: one draft with a brief, one without, acceptance split; the text has the column; export carries the brief row.
+  const r = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  const cell = r.cells.find((c) => c.level === 3 && c.arm === "anthropic");
+  assert.ok(cell.drafted_briefed >= 1 && cell.drafted_plain >= 1, JSON.stringify([cell.drafted_briefed, cell.drafted_plain]));
+  assert.ok("draft_accepted_briefed" in cell.rates && "draft_accepted_plain" in cell.rates);
+  assert.equal(r.restored_from, null);
+  const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
+  assert.match(text, /briefed: acc b\/p/); assert.doesNotMatch(text, /^restored from/);
+  const ex = (await s("GET", "/api/export")).body;
+  assert.equal(ex.learner_briefs.length, 1); assert.equal(ex.learner_briefs[0].text, (await brief()).text);
+  const g = await (await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/graph`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  assert.equal(g.brief.text, (await brief()).text, "the graph view carries the brief");
+  const h = (await s("GET", "/api/health")).body;
+  assert.deepEqual(h.memory, { snapshots: "off", every_ms: 300000, instances_assumed: 1, restored_from: null, last_snapshot: null, brief_reads: "on" }, "in-memory database: no snapshots");
+  // Delete takes the brief with it.
+  await s("DELETE", "/api/learner");
+  assert.equal((await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/brief`, { headers: { "x-gloo-admin": "test-owner-token" } })).status, 404);
 });
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {

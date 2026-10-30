@@ -140,9 +140,11 @@ const create = (p, body) => (p === "muse" ? museCreate(body) : (anthropic ??= ne
 // null for owner tools). The rest is an Anthropic messages.create body without `model`. Returns the response
 // in the Anthropic shape plus what was used: { res, provider, model, fallback_from, usage: { input, output }, ms, stop, note }.
 // `stop` is the stop reason ("max_tokens" means the answer was cut at the cap); `note` is "tool_from_text" when the
-// call was read out of the text, "no_tool" when tools were offered and none came back, else null. Both go on the row.
+// call was read out of the text, "no_tool" when tools were offered and none came back, else null. Both go on the row,
+// with `brief`: how many characters of the learner brief the prompt carried (0 for none; brief.mjs), and the note
+// says "brief_dropped" when the guard kept one out of this call.
 // Throws on a provider error after logging it; throws MODEL_UNAVAILABLE when no backend has a key.
-export async function complete({ provider = "anthropic", task = "model", sid = null, log = true, ...body }) {
+export async function complete({ provider = "anthropic", task = "model", sid = null, log = true, brief_chars = 0, brief_dropped = false, ...body }) {
   const use = pick(provider);
   if (!use) throw Object.assign(new Error(`No model provider is configured for ${task}.`), { code: "MODEL_UNAVAILABLE" });
   const model = MODELS[use.provider];
@@ -152,11 +154,12 @@ export async function complete({ provider = "anthropic", task = "model", sid = n
     const usage = { input: res.usage?.input_tokens ?? null, output: res.usage?.output_tokens ?? null, reasoning: res.usage?.reasoning_tokens ?? null };
     const ms = performance.now() - t0;
     const stop = res.stop_reason ?? null;
-    const note = res.note ?? (body.tools?.length && !(res.content ?? []).some((b) => b.type === "tool_use") ? "no_tool" : null);
-    if (log) q.logModel.run(sid, use.provider, task, "ok", null, ms, Date.now(), model, usage.input, usage.output, use.fallback_from, stop, note);
-    return { res, provider: use.provider, model, fallback_from: use.fallback_from, usage, ms, stop, note };
+    const base = res.note ?? (body.tools?.length && !(res.content ?? []).some((b) => b.type === "tool_use") ? "no_tool" : null);
+    const note = brief_dropped ? [base, "brief_dropped"].filter(Boolean).join(",") : base;
+    if (log) q.logModel.run(sid, use.provider, task, "ok", null, ms, Date.now(), model, usage.input, usage.output, use.fallback_from, stop, note, brief_chars);
+    return { res, provider: use.provider, model, fallback_from: use.fallback_from, usage, ms, stop, note, brief_chars };
   } catch (e) {
-    if (log) q.logModel.run(sid, use.provider, task, "error", null, performance.now() - t0, Date.now(), model, null, null, use.fallback_from, null, null);
+    if (log) q.logModel.run(sid, use.provider, task, "error", null, performance.now() - t0, Date.now(), model, null, null, use.fallback_from, null, brief_dropped ? "brief_dropped" : null, brief_chars);
     e.provider = use.provider;
     throw e;
   }

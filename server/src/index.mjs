@@ -9,7 +9,9 @@ import { cached, remember } from "./cache.mjs";
 import { toItems } from "./normalize.mjs";
 import { mockQloo } from "./mock.mjs";
 import { take } from "./limits.mjs";
-import { db, q, exportLearner, deleteLearner } from "./db.mjs";
+import { db, q, writes, exportLearner, deleteLearner } from "./db.mjs";
+import { refreshBrief, briefRow, briefForPrompt, readsOn as briefReadsOn } from "./brief.mjs";
+import { createSnapshotter, restoredFrom, enabled as snapshotsEnabled, DB_PATH, EVERY_MS as SNAPSHOT_EVERY_MS } from "./snapshot.mjs";
 import { testersReport, testersText } from "./testers.mjs";
 import { degreesReport, degreesText } from "./degrees.mjs";
 import { assess, promptHints, bestHeard } from "./assess.mjs";
@@ -38,6 +40,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
 const MOCK = process.env.QLOO_MOCK === "1" || process.argv.includes("--mock");
 const PORT = Number(process.env.PORT ?? 8787);
+let snapshots = null; // the snapshot timer (snapshot.mjs), once the server listens
 // Hosted demo gate: camera, voice, the agent and lesson drafting spend money; reviewed lessons stay open.
 const PASSCODE = String(process.env.DEMO_PASSCODE ?? "").trim();
 // Owner token for the lesson API and the /edit console. Separate from the passcode; unset = owner API off.
@@ -158,6 +161,7 @@ app.get("/api/health", wrap(async (req, res) => {
     taste: { signals: signalsFor(req.sid).length, min_picks: MIN_PICKS, reserve: TASTE_RESERVE, entities: knownEntities() },
     gated: Boolean(PASSCODE), unlocked: unlocked(req.sid), admin: Boolean(ADMIN_TOKEN), lessons: listTerms().length, engine: ENGINE, schedule_policy: POLICY.version,
     credits: { rules: credits.RULES, welcome: credits.CONFIG.welcome, word: credits.CONFIG.word, referral: credits.CONFIG.referral },
+    memory: { snapshots: snapshotsEnabled() ? "on" : "off", every_ms: SNAPSHOT_EVERY_MS, instances_assumed: 1, restored_from: restoredFrom(), last_snapshot: snapshots?.last() ?? null, brief_reads: briefReadsOn() ? "on" : "off" },
     unavailable: ["pronunciation scoring", "glasses input", "mastery bonus", "encounter detection"] });
 }));
 
@@ -228,6 +232,7 @@ app.post("/api/terms/:id/first-attempt", (req, res) => {
   const pieces = skipped ? null : scorePieces(termPieces(t), response);
   if (q.putFirst.run(req.sid, t.id, response, skipped ? 1 : 0, String(t.version), Date.now(), pieces ? JSON.stringify(pieces) : null).changes) {
     recordNode(req.sid, "word", t.id, t.title, { provisional: Boolean(t.provisional), skipped, said: pieces?.said_count ?? null, pieces: pieces?.pieces?.length ?? null });
+    refreshBrief(req.sid);
   }
   credits.activate(req.sid); // a referred learner's first word experience may be complete now
   res.json({ saved: true, pieces });
@@ -308,10 +313,11 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
     if (!lim.ok) return res.status(429).json({ status: "limited", reason: lim.reason, cues: [], trace: [], calls: [] });
     const t0 = performance.now();
     try {
-      result = await runCueAgent({ term: t, familiar, run, focus, provider: req.arm, sid: req.sid });
-      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null, null, null);
+      const brief = briefForPrompt(req.sid); // the learner brief (brief.mjs) rides beside the familiar list
+      result = await runCueAgent({ term: t, familiar, run, focus, provider: req.arm, sid: req.sid, brief: brief.text, briefDropped: brief.dropped });
+      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null, null, brief.dropped ? "brief_dropped" : null, brief.chars);
     } catch (e) {
-      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null);
+      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0);
       result = { status: "error", reason: e.status ? `Model provider error (${e.status}).` : "Model provider error.", cues: [], trace: [] };
     }
   } else if (MOCK) {
@@ -379,7 +385,7 @@ app.post("/api/glue", wrap(async (req, res) => {
       if (!lim.ok) return res.status(429).json({ error: lim.reason });
       const t0 = performance.now();
       try { read = await readWord({ image, mime, provider: req.arm, sid: req.sid }); }
-      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null); console.error("read_word:", e.message);
+      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0); console.error("read_word:", e.message);
         return res.status(502).json({ error: "Couldn't read the frame right now. Try again, say it, or type it." }); }
     }
     if (!read.word) return res.status(422).json({ error: "No word in the frame. Get closer and hold steady, or say it." });
@@ -432,7 +438,8 @@ app.post("/api/glue", wrap(async (req, res) => {
     // Degree 2: the drafter names more candidates per piece and Qloo keeps the ones it knows, pictures included (cards.mjs).
     const built = req.level >= 2;
     if (agentMode() === "live") {
-      try { packet = await draftLesson(id, best.word, { candidates: built ? CANDIDATES : 4, provider: req.arm, sid: req.sid }); }
+      const brief = briefForPrompt(req.sid); // the learner brief (brief.mjs): pick names from the domains this learner likes, first
+      try { packet = await draftLesson(id, best.word, { candidates: built ? CANDIDATES : 4, provider: req.arm, sid: req.sid, brief: brief.text, briefDropped: brief.dropped }); }
       catch (e) { console.error("draft_lesson:", e.message);
         const back = credits.refundWord(req.sid, best.word);
         return res.status(502).json({ error: "Couldn't draft a lesson for that word right now. Your Gloo is back. Try again, or a reviewed lesson.", balance: back.balance }); }
@@ -443,6 +450,7 @@ app.post("/api/glue", wrap(async (req, res) => {
     q.addProvisional.run(id, req.sid, best.word, packet.origin, JSON.stringify(packet), Date.now());
     termId = id;
     created = true;
+    refreshBrief(req.sid);
   }
   // Spoken capture of a word doubles as the first attempt, saved before anything is shown.
   if (mode === "voice" && captured === "voice" && !q.getFirst.get(req.sid, termId)) {
@@ -488,6 +496,7 @@ app.post("/api/learner/cues", wrap(async (req, res) => {
     const role = t.roles.find((r) => r.id === b.role);
     recordNode(req.sid, "pick", entityId ?? entityName ?? label, label, { term_id: t.id, role: b.role, type: entityType, entity_id: entityId, hook_source: hook, shown_rank: rank });
     recordNode(req.sid, "hook", role?.sound_like ? "sound" : "meaning", role?.part ?? role?.label ?? b.role, { term_id: t.id, role: b.role, part: role?.part ?? null, sound_like: role?.sound_like ?? null });
+    refreshBrief(req.sid);
   }
   res.json(q.cuesFor.all(req.sid, t.id));
 }));
@@ -542,6 +551,7 @@ app.post("/api/attempts", (req, res) => {
     q.consumeHints.run(req.sid, prompt.id);
     recordNode(req.sid, "outcome", term.id, term.title, { prompt_id: prompt.id, skill: prompt.skill, outcome: result.outcome, hinted, independent });
     db.exec("COMMIT");
+    refreshBrief(req.sid);
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}
     if (String(e.message).includes("UNIQUE")) {
@@ -644,16 +654,25 @@ app.get("/api/admin/lessons", admin, (req, res) => res.json(lessons.summaries())
 app.get("/api/admin/testers", admin, (req, res) => {
   const hours = Math.min(24 * 30, Math.max(0.1, Number(req.query.hours ?? 48) || 48));
   const report = testersReport(db, { since: Date.now() - hours * 3600e3 });
-  if (req.query.format === "text") return res.type("text/plain").send(testersText(report));
-  res.json(report);
+  if (req.query.format === "text") return res.type("text/plain").send(restoredLine() + testersText(report));
+  res.json({ ...report, restored_from: restoredFrom() });
 });
 
 // The degrees report: the same window, split by degree of Qloo: cards, picks, pictures, practice, recall, calls, latency.
 app.get("/api/admin/degrees", admin, (req, res) => {
   const hours = Math.min(24 * 30, Math.max(0.1, Number(req.query.hours ?? 48) || 48));
   const report = degreesReport(db, { since: Date.now() - hours * 3600e3 });
-  if (req.query.format === "text") return res.type("text/plain").send(degreesText(report));
-  res.json(report);
+  if (req.query.format === "text") return res.type("text/plain").send(restoredLine() + degreesText(report));
+  res.json({ ...report, restored_from: restoredFrom() });
+});
+// The line a report opens with after a restore: the memory the rows come from spans a redeploy.
+const restoredLine = () => { const r = restoredFrom(); return r ? `restored from the snapshot taken ${new Date(r.taken_at).toISOString()}${r.revision ? ` by ${r.revision}` : ""}${r.late ? " (late, before any write here)" : ""}\n\n` : ""; };
+
+// One learner's brief: the paragraph the agent and the drafter read about them, with its facts.
+app.get("/api/admin/learners/:sid/brief", admin, (req, res) => {
+  if (!/^[a-f0-9]{32}$/.test(req.params.sid)) return res.status(400).json({ error: "sid is 32 hex characters" });
+  if (!q.getLevel.get(req.params.sid)) return res.status(404).json({ error: "unknown learner" });
+  res.json({ sid: req.params.sid, brief: briefRow(req.params.sid), reads: briefReadsOn() ? "on" : "off", max_chars: Number(process.env.BRIEF_MAX_CHARS ?? 700) });
 });
 
 // One learner's graph over time: nodes in order, the tag-bag embedding, and the trajectory between snapshots.
@@ -661,7 +680,7 @@ app.get("/api/admin/degrees", admin, (req, res) => {
 app.get("/api/admin/learners/:sid/graph", admin, wrap(async (req, res) => {
   if (!/^[a-f0-9]{32}$/.test(req.params.sid)) return res.status(400).json({ error: "sid is 32 hex characters" });
   if (!q.getLevel.get(req.params.sid)) return res.status(404).json({ error: "unknown learner" });
-  res.json(await learnerGraph(req.params.sid, (op, args) => runQloo(req.sid, op, args)));
+  res.json({ ...(await learnerGraph(req.params.sid, (op, args) => runQloo(req.sid, op, args))), brief: briefRow(req.params.sid) });
 }));
 
 app.get("/api/admin/lessons/:id", admin, (req, res) => {
@@ -807,4 +826,6 @@ app.use((err, _req, res, _next) => {
 });
 
 media.mode().then((m) => console.log(`media: ${m}`)); // choose the store now, not on the first request
-app.listen(PORT, () => console.log(`qloo-gloo on :${PORT} · Qloo ${MOCK ? "MOCK" : "live"} · agent ${agentMode()} · engine ${ENGINE}${PASSCODE ? " · passcode gate on" : ""}`));
+const server = app.listen(PORT, () => console.log(`qloo-gloo on :${PORT} · Qloo ${MOCK ? "MOCK" : "live"} · agent ${agentMode()} · engine ${ENGINE}${PASSCODE ? " · passcode gate on" : ""}`));
+// Learner memory across redeploys (snapshot.mjs): the database to the store on a timer and at SIGTERM; boot.mjs restored it.
+if (snapshotsEnabled()) snapshots = createSnapshotter({ db, path: DB_PATH, media, writes }).start({ server });

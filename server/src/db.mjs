@@ -2,13 +2,22 @@
 // Local: server/data/gloo.db. Cloud Run: set DB_PATH (see docs/DEPLOY.md for durability notes).
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import { DB_PATH as path } from "./snapshot.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const path = process.env.DB_PATH ?? resolve(here, "../data/gloo.db");
 if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
 export const db = new DatabaseSync(path);
+// How many writing statements ran on this connection (snapshot.mjs: a newer snapshot may replace the database
+// only while this is 0). Every module prepares its statements through db.prepare, so the count is complete.
+export const writes = { n: 0 };
+{
+  const prepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    const st = prepare(sql);
+    if (/^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql)) { const run = st.run.bind(st); st.run = (...a) => { writes.n++; return run(...a); }; }
+    return st;
+  };
+}
 
 db.exec(`
 PRAGMA journal_mode = WAL;
@@ -39,6 +48,7 @@ CREATE TABLE IF NOT EXISTS learner_nodes (
 CREATE INDEX IF NOT EXISTS learner_nodes_sid ON learner_nodes (sid, created_at);
 CREATE TABLE IF NOT EXISTS learner_embeddings (
   id INTEGER PRIMARY KEY, sid TEXT NOT NULL, nodes INTEGER NOT NULL, dims INTEGER NOT NULL, vector TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS learner_briefs (sid TEXT PRIMARY KEY, text TEXT NOT NULL, facts TEXT NOT NULL, nodes INTEGER NOT NULL, chars INTEGER NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS provider_calls (
   id INTEGER PRIMARY KEY, sid TEXT, provider TEXT NOT NULL, op TEXT NOT NULL, status TEXT NOT NULL, cache TEXT, duration_ms REAL, created_at INTEGER NOT NULL);
 `);
@@ -71,7 +81,7 @@ if (!db.prepare("PRAGMA table_info(first_attempts)").all().some((c) => c.name ==
   if (!db.prepare("PRAGMA table_info(pick_offers)").all().some((c) => c.name === "build_ms")) db.exec("ALTER TABLE pick_offers ADD COLUMN build_ms REAL");
   // Model calls (providers.mjs): which model answered, what it cost in tokens, and whether the arm asked for fell back.
   const calls = db.prepare("PRAGMA table_info(provider_calls)").all().map((c) => c.name);
-  for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"], ["stop", "TEXT"], ["note", "TEXT"]]) {
+  for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"], ["stop", "TEXT"], ["note", "TEXT"], ["brief", "INTEGER"]]) {
     if (!calls.includes(col)) db.exec(`ALTER TABLE provider_calls ADD COLUMN ${col} ${type}`);
   }
 }
@@ -117,7 +127,7 @@ export const q = {
   editCue: db.prepare("UPDATE learner_cues SET connection = ? WHERE id = ? AND sid = ? AND removed_at IS NULL"),
   removeCue: db.prepare("UPDATE learner_cues SET removed_at = ? WHERE id = ? AND sid = ?"),
   logCall: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
-  logModel: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at, model, tokens_in, tokens_out, fallback_from, stop, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+  logModel: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at, model, tokens_in, tokens_out, fallback_from, stop, note, brief) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   callCounts: db.prepare("SELECT provider, status, COUNT(*) AS n FROM provider_calls WHERE sid = ? GROUP BY provider, status"),
 };
 
@@ -125,13 +135,13 @@ export function exportLearner(sid) {
   const all = (t) => db.prepare(`SELECT * FROM ${t} WHERE sid = ?`).all(sid);
   return { first_attempts: all("first_attempts"), attempts: all("attempts"), learner_cues: all("learner_cues"),
     provisional_terms: all("provisional_terms"), resolutions: all("resolutions"), provider_calls: all("provider_calls"), pick_offers: all("pick_offers"),
-    learner_nodes: all("learner_nodes"), learner_embeddings: all("learner_embeddings") };
+    learner_nodes: all("learner_nodes"), learner_embeddings: all("learner_embeddings"), learner_briefs: all("learner_briefs") };
 }
 
 export function deleteLearner(sid) {
   db.exec("BEGIN");
   try {
-    for (const t of ["first_attempts", "attempts", "hint_exposures", "learner_cues", "provisional_terms", "resolutions", "provider_calls", "pick_offers", "learner_nodes", "learner_embeddings", "learners"]) {
+    for (const t of ["first_attempts", "attempts", "hint_exposures", "learner_cues", "provisional_terms", "resolutions", "provider_calls", "pick_offers", "learner_nodes", "learner_embeddings", "learner_briefs", "learners"]) {
       db.prepare(`DELETE FROM ${t} WHERE sid = ?`).run(sid);
     }
     db.exec("COMMIT");

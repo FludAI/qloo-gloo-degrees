@@ -58,6 +58,7 @@ Method:
 2. Use qloo_recommend with the resolved IDs as signals to find what people with that taste also tend to know, choosing target types that could carry a role (brands, films, artists, books, tv_shows...).
 3. From real Qloo results, pick at most 3 entities that carry a specific role through an approximate sound, a meaning, an operation, or a reinforcement. General relevance is not enough.
 4. Call propose_cues. Use only qloo_entity_id values returned by Qloo in this session; otherwise null.
+5. When the learner's note ("About me so far") names domains they like, look there first: a hook in a domain that has already stuck for them is worth more than a novel one; a domain whose hook failed is still allowed, but say so in the connection.
 
 Rules:
 - Qloo results describe what groups tend to like. They do not prove this learner knows an entity; the learner will confirm.
@@ -102,7 +103,9 @@ function validate(term, proposal, seenIds) {
 // run(op, args) -> Qloo envelope (already guarded, cached and logged by the caller)
 // `focus` names the role the learner is on ("None of these" on that card): the agent fills it first.
 // `provider` is the session's model arm; `sid` goes on each step's provider_calls row (task cue_agent_step).
-export async function runCueAgent({ term, familiar, run, focus = null, provider = "anthropic", sid = null }) {
+// `brief` is the learner brief (brief.mjs: public names, lesson titles, outcomes), or null; `briefDropped` says the
+// guard kept one out, which every step's row then notes.
+export async function runCueAgent({ term, familiar, run, focus = null, provider = "anthropic", sid = null, brief = null, briefDropped = false }) {
   if (agentMode() !== "live") return { status: "unavailable", reason: "No model provider is configured on the server.", cues: [], trace: [] };
 
   const tools = [...QLOO_TOOLS, proposeTool(term)];
@@ -111,12 +114,12 @@ export async function runCueAgent({ term, familiar, run, focus = null, provider 
   const seenIds = new Set();
   const usage = { input_tokens: 0, output_tokens: 0 };
   const messages = [{ role: "user", content:
-    `Things I already know and like: ${familiar.map((f) => `"${f}"`).join(", ")}.\nFind up to 3 cues that help me learn ${term.title}.${focus ? ` I am on the piece "${focus}": fill that role first.` : ""}` }];
+    `Things I already know and like: ${familiar.map((f) => `"${f}"`).join(", ")}.${brief ? `\nAbout me so far: ${brief}` : ""}\nFind up to 3 cues that help me learn ${term.title}.${focus ? ` I am on the piece "${focus}": fill that role first.` : ""}` }];
 
   for (let step = 0; step < MAX_STEPS; step++) {
     // Current models reject forced tool choice; at the step limit the model is told to finish instead.
     if (step === MAX_STEPS - 1) messages.push({ role: "user", content: "Step limit reached. Call propose_cues now with the best cues from the Qloo results you already have." });
-    const out = await complete({ provider, task: "cue_agent_step", sid, max_tokens: 1500, system: systemPrompt(term), tools, messages, tool_choice: { type: "auto" } });
+    const out = await complete({ provider, task: "cue_agent_step", sid, brief_chars: brief ? brief.length : 0, brief_dropped: briefDropped, max_tokens: 1500, system: systemPrompt(term), tools, messages, tool_choice: { type: "auto" } });
     const res = out.res;
     used = { provider: out.provider, model: out.model, fallback_from: out.fallback_from };
     usage.input_tokens += res.usage?.input_tokens ?? 0;

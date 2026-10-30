@@ -96,7 +96,8 @@ export function createStore(opts = {}) {
     async del(key) { check(key); await (await ready()).del(at(key)); lru.delete(key); missing.add(key); },
     async getJson(key) { const b = await store.get(key); if (!b) return null; try { return JSON.parse(b.toString("utf8")); } catch { return null; } },
     putJson: (key, value) => store.put(key, Buffer.from(JSON.stringify(value)), "application/json"),
-    forget: () => { lru.clear(); missing.clear(); },
+    // Drop what is cached for one key (an object another process may have rewritten, such as the database snapshot), or everything.
+    forget: (key) => { if (key) { lru.delete(key); missing.delete(key); } else { lru.clear(); missing.clear(); } },
   };
   return store;
 }

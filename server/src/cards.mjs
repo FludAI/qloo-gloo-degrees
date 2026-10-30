@@ -6,6 +6,7 @@
 import { loadEntities, entityFor, learnEntity, isUnresolved, markUnresolved, norm, TYPES } from "./taste.mjs";
 import { remaining } from "./limits.mjs";
 import { RESERVE } from "./taste.mjs";
+import { soundScore, SOUND } from "./reviewer.mjs";
 
 export const POP_FLOOR = Number(process.env.QLOO_POP_FLOOR ?? 0.3); // a candidate below this popularity is dropped
 export const DESCRIBE_CAP = Number(process.env.QLOO_DESCRIBE_PER_WORD ?? 40); // describe calls per drafted word, at most
@@ -65,10 +66,20 @@ export async function qlooCards(packet, call, { floor = POP_FLOOR, cap = DESCRIB
         rest.push({ ...o, qloo: rec?.id ? { entity: name, type, entity_id: rec.id, popularity: rec.popularity ?? null, image: rec.image ?? null } : o.qloo ?? null });
       }
     }
-    resolved.sort((a, b) => b.qloo.popularity - a.qloo.popularity);
+    // Taste ranking (taste.mjs) ranks one Qloo type at a time and needs two names of that type which carry the part's
+    // sound; a card of singletons (one person, one book, one film, one show) can never be ranked. So names that pair
+    // up by type lead the card, the type with the most sound-cleared names first, singletons after, each by popularity.
+    const cleared = (o) => !role.sound_like || soundScore(role, o) >= SOUND;
+    const sizes = new Map();
+    for (const o of resolved) if (cleared(o)) sizes.set(o.qloo.type, (sizes.get(o.qloo.type) ?? 0) + 1);
+    const pairSize = (o) => ((sizes.get(o.qloo.type) ?? 0) >= 2 ? sizes.get(o.qloo.type) : 0);
+    resolved.sort((a, b) => pairSize(b) - pairSize(a) || (pairSize(a) ? String(a.qloo.type).localeCompare(String(b.qloo.type)) : 0) || b.qloo.popularity - a.qloo.popularity);
     // Fewer than four popular names: the drafter's others fill the card, in its order, without a Qloo picture.
     const kept = [...resolved, ...rest].slice(0, Math.max(4, Math.min(keep, resolved.length)));
-    roles.push({ ...role, pick: { ...role.pick, options: kept, built: { source: "qloo", candidates: options.length, resolved: resolved.length, kept: kept.length, floor } } });
+    // The types rank can compare on this card (two resolved names of the type that carry the sound); rank reorders every kept option, not only the four shown.
+    const pairs = kept.filter((o) => o.qloo?.entity_id && cleared(o));
+    const rankable = [...new Set(pairs.map((o) => o.qloo.type))].filter((t) => pairs.filter((o) => o.qloo.type === t).length >= 2);
+    roles.push({ ...role, pick: { ...role.pick, options: kept, built: { source: "qloo", candidates: options.length, resolved: resolved.length, kept: kept.length, floor, rankable } } });
   }
   return { ...packet, roles, cards: { source: "qloo", describes: state.calls, skipped: state.skipped, unasked: state.unasked, cap, floor } };
 }

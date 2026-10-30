@@ -11,10 +11,14 @@ const median = (xs) => { const a = xs.filter((x) => Number.isFinite(x)).sort((x,
 const rate = (n, d) => (d ? Number((n / d).toFixed(3)) : null);
 const safeJson = (s) => { try { const v = JSON.parse(s ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 
-export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
-  const learners = db.prepare("SELECT sid, qloo_level, qloo_forced, model_arm, model_forced, created_at FROM learners WHERE created_at >= ? ORDER BY created_at").all(since);
-  const offers = db.prepare("SELECT term_id, role, tailored, options, at, build_ms FROM pick_offers WHERE sid = ?");
-  const picks = db.prepare("SELECT term_id, role, label, hook_source, shown_rank, created_at FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick'");
+// `include`: true merges the synthetic learners (simulated personas, scripts/simulate-learner.mjs) into the tables;
+// by default they are reported apart, in `synthetic`, and never in the real figures.
+export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = false } = {}) {
+  const everyone = db.prepare("SELECT sid, qloo_level, qloo_forced, model_arm, model_forced, created_at, synthetic FROM learners WHERE created_at >= ? ORDER BY created_at").all(since);
+  const real = everyone.filter((l) => !l.synthetic), simulated = everyone.filter((l) => l.synthetic);
+  const learners = include ? everyone : real;
+  const offers = db.prepare("SELECT term_id, role, tailored, options, at, build_ms, reason FROM pick_offers WHERE sid = ?");
+  const picks = db.prepare("SELECT term_id, role, label, hook_source, shown_rank, created_at, judge_score FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick'");
   const attempts = db.prepare("SELECT outcome, independent FROM attempts WHERE sid = ?");
   const calls = db.prepare("SELECT provider, op, status, cache, duration_ms, model, tokens_in, tokens_out, fallback_from, stop, note FROM provider_calls WHERE sid = ?");
   const drafts = db.prepare("SELECT id, created_at FROM provisional_terms WHERE sid = ? ORDER BY created_at, rowid");
@@ -26,14 +30,14 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
 
   // ---- One learner's numbers, computed once, then added to each grouping it belongs to. ----
   const statsOf = (sid) => {
-    const s = { cards: 0, tailored_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0,
+    const s = { cards: 0, tailored_cards: 0, unrankable_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
       answers: 0, correct: 0, independent: 0, recall: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
       qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, no_cards: 0, drafted_briefed: 0, accepted_briefed: 0, drafted_plain: 0, accepted_plain: 0, tokens_in: 0, tokens_out: 0,
       build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) };
     const o = offers.all(sid), p = picks.all(sid), a = attempts.all(sid), c = calls.all(sid), d = drafts.all(sid);
     const pickAt = new Map(p.map((x) => [`${x.term_id}|${x.role}`, x]));
     for (const card of o) {
-      s.cards++; if (card.tailored) s.tailored_cards++;
+      s.cards++; if (card.tailored) s.tailored_cards++; if (card.reason === "one entity") s.unrankable_cards++; // no two names of one type: nothing for rank to compare
       const tiles = safeJson(card.options).slice(0, 4);
       s.tiles += tiles.length; s.pictured_tiles += tiles.filter(pictured).length;
       if (Number.isFinite(card.build_ms)) s.build_ms.push(card.build_ms);
@@ -41,7 +45,8 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
       if (!pick) s.skipped_cards++;
       else if (pick.created_at >= card.at) s.pick_ms.push(pick.created_at - card.at);
     }
-    for (const x of p) { s.picks++; if (x.shown_rank === 0) s.first_tile_picks++; if (x.hook_source === "taste") s.taste_picks++; if (x.hook_source === "own") s.own_picks++; if (x.hook_source === "agent") s.agent_picks++; }
+    for (const x of p) { s.picks++; if (x.shown_rank === 0) s.first_tile_picks++; if (x.hook_source === "taste") s.taste_picks++; if (x.hook_source === "own") s.own_picks++; if (x.hook_source === "agent") s.agent_picks++;
+      if (Number.isInteger(x.judge_score)) { s.judged++; s.sound_sum += x.judge_score; } }
     for (const x of a) { s.answers++; if (x.outcome === "correct") { s.correct++; if (x.independent) { s.independent++; s.recall = 1; } } }
     const pickedTerms = new Set(p.map((x) => x.term_id));
     s.drafted_words = d.length; s.accepted_drafts = d.filter((x) => pickedTerms.has(x.id)).length; // a draft the learner went on to pick a hook in
@@ -62,7 +67,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
     }
     return s;
   };
-  const blank = (extra) => ({ ...extra, sessions: 0, forced: 0, cards: 0, tailored_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0,
+  const blank = (extra) => ({ ...extra, sessions: 0, forced: 0, cards: 0, tailored_cards: 0, unrankable_cards: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
     answers: 0, correct: 0, independent: 0, recall_sessions: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
     qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, no_cards: 0, drafted_briefed: 0, accepted_briefed: 0, drafted_plain: 0, accepted_plain: 0, tokens_in: 0, tokens_out: 0,
     build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) });
@@ -77,6 +82,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   };
   const finish = ({ build_ms, pick_ms, ms, ...g }) => ({
     ...g,
+    sound_match: g.judged ? Number((g.sound_sum / g.judged).toFixed(2)) : null, // mean 0-3 over the hooks a model judged (judge.mjs)
     rates: { first_tile: rate(g.first_tile_picks, g.picks), picture: rate(g.pictured_tiles, g.tiles), skip: rate(g.skipped_cards, g.cards),
       practice_correct: rate(g.correct, g.answers), independent: rate(g.independent, g.answers), recall_sessions: rate(g.recall_sessions, g.sessions),
       taste_picks: rate(g.taste_picks, g.picks), read_ok: rate(g.reads_ok, g.reads_tried), draft_ok: rate(g.drafts_ok, g.drafts_tried), draft_accepted: rate(g.accepted_drafts, g.drafted_words),
@@ -85,26 +91,41 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
     median_ms: Object.fromEntries(MODEL_OPS.map((op) => [op, median(ms[op])])),
   });
 
-  const byLevel = new Map(LEVELS.map((l) => [l, blank({ level: l, degree: NAMES[l] })]));
-  const byArm = new Map(ARMS.map((a) => [a, blank({ arm: a })]));
-  const cells = new Map();
-  for (const { sid, qloo_level, qloo_forced, model_arm, model_forced } of learners) {
-    const level = LEVELS.includes(qloo_level) ? qloo_level : null;
-    const arm = ARMS.includes(model_arm) ? model_arm : null;
-    if (!byLevel.has(level)) byLevel.set(level, blank({ level, degree: "unassigned" }));
-    if (!byArm.has(arm)) byArm.set(arm, blank({ arm: arm ?? "unassigned" }));
-    const key = `${level ?? "?"}|${arm ?? "?"}`;
-    if (!cells.has(key)) cells.set(key, blank({ level, arm: arm ?? "unassigned" }));
-    const s = statsOf(sid);
-    add(byLevel.get(level), s, qloo_forced);
-    add(byArm.get(arm), s, model_forced);
-    add(cells.get(key), s, qloo_forced || model_forced);
-  }
-  const order = (x, y) => (x.level ?? 9) - (y.level ?? 9) || String(x.arm ?? "").localeCompare(String(y.arm ?? ""));
-  return { since, sessions: learners.length,
-    levels: [...byLevel.values()].sort(order).map(finish),
-    models: [...byArm.values()].sort((x, y) => ARMS.indexOf(x.arm) - ARMS.indexOf(y.arm)).map(finish),
-    cells: [...cells.values()].sort(order).map(finish) };
+  const order = (x, y) => (x.level ?? 9) - (y.level ?? 9) || String(x.arm ?? "").localeCompare(String(y.arm ?? "")) || String(x.persona ?? "").localeCompare(String(y.persona ?? ""));
+  // The three groupings over a set of learners, each learner's numbers computed once; with `personas`, a fourth by persona, level and arm.
+  const build = (rows, { personas = false } = {}) => {
+    const byLevel = new Map(LEVELS.map((l) => [l, blank({ level: l, degree: NAMES[l] })]));
+    const byArm = new Map(ARMS.map((a) => [a, blank({ arm: a })]));
+    const cells = new Map(), byPersona = new Map();
+    const stats = new Map();
+    for (const { sid, qloo_level, qloo_forced, model_arm, model_forced, synthetic } of rows) {
+      const level = LEVELS.includes(qloo_level) ? qloo_level : null;
+      const arm = ARMS.includes(model_arm) ? model_arm : null;
+      if (!byLevel.has(level)) byLevel.set(level, blank({ level, degree: "unassigned" }));
+      if (!byArm.has(arm)) byArm.set(arm, blank({ arm: arm ?? "unassigned" }));
+      const key = `${level ?? "?"}|${arm ?? "?"}`;
+      if (!cells.has(key)) cells.set(key, blank({ level, arm: arm ?? "unassigned" }));
+      const s = stats.get(sid) ?? statsOf(sid); stats.set(sid, s);
+      add(byLevel.get(level), s, qloo_forced);
+      add(byArm.get(arm), s, model_forced);
+      add(cells.get(key), s, qloo_forced || model_forced);
+      if (personas) {
+        const pk = `${synthetic}|${key}`;
+        if (!byPersona.has(pk)) byPersona.set(pk, blank({ persona: synthetic, level, arm: arm ?? "unassigned" }));
+        add(byPersona.get(pk), s, qloo_forced || model_forced);
+      }
+    }
+    return { sessions: rows.length,
+      levels: [...byLevel.values()].sort(order).map(finish),
+      models: [...byArm.values()].sort((x, y) => ARMS.indexOf(x.arm) - ARMS.indexOf(y.arm)).map(finish),
+      cells: [...cells.values()].sort(order).map(finish),
+      ...(personas ? { personas: [...byPersona.values()].sort(order).map(finish) } : {}) };
+  };
+  const main = build(learners);
+  // The synthetic section: the simulated sessions on their own, by persona too; its practice is scripted (the
+  // simulator answers by rule, so correct means the rubric matched, never that a learner remembered).
+  const synthetic = { ...build(simulated, { personas: true }), included: include, judged_by: "a model (judge.mjs)", practice: "scripted, not retention" };
+  return { since, ...main, synthetic_sessions: simulated.length, include_synthetic: include, synthetic };
 }
 
 // Plain-text tables for a terminal: one row per level, one per model arm, one per level and arm.
@@ -117,18 +138,26 @@ export function degreesText(report) {
     return [fmt(head), fmt(widths.map((w) => "-".repeat(w))), ...rows.map(fmt)];
   };
   const sessions = (g) => `${g.sessions}${g.forced ? ` (${g.forced} forced)` : ""}`;
-  const levelRows = report.levels.map((g) => [g.level ?? "?", g.degree, sessions(g), String(g.cards), String(g.tailored_cards),
+  const levelRows = report.levels.map((g) => [g.level ?? "?", g.degree, sessions(g), String(g.cards), String(g.tailored_cards), String(g.unrankable_cards),
     pct(g.rates.first_tile), pct(g.rates.picture), pct(g.rates.skip), `${g.correct}/${g.answers}`, `${g.independent} (${g.recall_sessions} sess)`, String(g.own_picks),
     String(g.qloo_calls), String(g.qloo_cache_hits), String(g.agent_calls), String(g.agent_picks), String(g.drafted_words), ms(g.median_build_ms), ms(g.median_pick_ms)]);
   const modelRows = report.models.map((g) => [g.arm, sessions(g), `${g.reads_ok}/${g.reads_tried}`, `${g.drafts_ok}/${g.drafts_tried}`, pct(g.rates.draft_accepted), `${g.drafted_briefed}: ${pct(g.rates.draft_accepted_briefed)}/${pct(g.rates.draft_accepted_plain)}`,
     pct(g.rates.picture), pct(g.rates.first_tile), `${g.correct}/${g.answers}`, String(g.independent), String(g.model_calls), String(g.model_errors), String(g.fallbacks), `${g.model_cut}/${g.text_tools}/${g.no_cards}`,
     `${g.tokens_in}/${g.tokens_out}`, ms(g.median_ms.read_word), ms(g.median_ms.draft_lesson), ms(g.median_ms.cue_agent)]);
   const cellRows = report.cells.map((g) => [g.level ?? "?", g.arm, sessions(g), String(g.cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.independent), String(g.drafted_words), String(g.agent_picks)]);
-  return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}`, "", "by degree of Qloo",
-    ...table(["level", "degree", "sessions", "cards", "tailored", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"], levelRows),
+  const syn = report.synthetic ?? { sessions: 0, personas: [] };
+  const score = (g) => (g.sound_match == null ? "-" : `${g.sound_match} (${g.judged})`);
+  const personaRows = (syn.personas ?? []).map((g) => [g.persona, g.level ?? "?", g.arm, String(g.sessions), String(g.cards), String(g.tailored_cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.drafted_words), String(g.agent_picks), String(g.qloo_calls), `${g.tokens_in}/${g.tokens_out}`, score(g)]);
+  const synthetic = !syn.sessions ? [] : [
+    "", report.include_synthetic ? `synthetic learners (${syn.sessions} simulated sessions, merged into the tables above with ?include=synthetic)` : `synthetic learners (${syn.sessions} simulated sessions, kept out of the tables above; ?include=synthetic merges them)`,
+    ...table(["persona", "level", "arm", "sessions", "cards", "tailored", "1st-tile", "pictures", "practice (scripted)", "drafts", "agent-picks", "qloo", "tokens in/out", "sound 0-3 (judged by a model)"], personaRows),
+    "practice (scripted): the simulator answers by rule, so correct means the rubric matched, never that anyone remembered; sound: mean sound-match score of the hooks a model judged (count), 0 a shared first letter only, 3 the name says the part"];
+  return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}${report.synthetic_sessions ? report.include_synthetic ? ` (${report.synthetic_sessions} synthetic included)` : ` real (+${report.synthetic_sessions} synthetic, below)` : ""}`, "", "by degree of Qloo",
+    ...table(["level", "degree", "sessions", "cards", "tailored", "1-type", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"], levelRows),
     "", "by model arm",
     ...table(["arm", "sessions", "reads", "drafts", "accepted", "briefed: acc b/p", "pictures", "1st-tile", "practice", "recall", "calls", "errors", "fallbacks", "cut/text/no-cards", "tokens in/out", "read ms", "draft ms", "agent ms"], modelRows),
     "", "by degree and arm",
     ...table(["level", "arm", "sessions", "cards", "1st-tile", "pictures", "practice", "recall", "drafts", "agent-picks"], cellRows),
-    "", "1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); briefed: drafts whose prompt carried the learner brief, then acceptance with a brief / without; cut/text/no-cards: model answers cut at the output cap / tool calls the model wrote as JSON text / drafts that came back without a pick card (redrafted at four options, never shipped); build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
+    ...synthetic,
+    "", "1-type: cards left editorial because no two names shared a Qloo type (nothing for rank to compare); 1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); briefed: drafts whose prompt carried the learner brief, then acceptance with a brief / without; cut/text/no-cards: model answers cut at the output cap / tool calls the model wrote as JSON text / drafts that came back without a pick card (redrafted at four options, never shipped); build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
 }

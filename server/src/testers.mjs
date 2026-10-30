@@ -4,8 +4,10 @@
 // not people: the report says where a session stopped, never who it was.
 const STAGES = ["visited", "gate", "read", "lesson", "pick", "practice", "correct"];
 
-export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
-  const learners = db.prepare("SELECT sid, created_at, qloo_level, qloo_forced FROM learners WHERE created_at >= ? ORDER BY created_at").all(since);
+// `include`: true merges the synthetic learners (simulated personas) into the rows and the funnel; by default they
+// are listed apart in `synthetic` and never counted in the funnel.
+export function testersReport(db, { since = Date.now() - 48 * 3600e3, include = false } = {}) {
+  const learners = db.prepare("SELECT sid, created_at, qloo_level, qloo_forced, synthetic FROM learners WHERE created_at >= ? ORDER BY created_at").all(since);
   const beacons = db.prepare("SELECT event, data, created_at FROM beacons WHERE sid = ? ORDER BY created_at");
   const calls = db.prepare("SELECT provider, op, status, cache, created_at FROM provider_calls WHERE sid = ? ORDER BY created_at");
   const firsts = db.prepare("SELECT term_id, skipped, created_at FROM first_attempts WHERE sid = ?");
@@ -14,7 +16,7 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
   const drafts = db.prepare("SELECT word, created_at FROM provisional_terms WHERE sid = ?");
   const resolutions = db.prepare("SELECT mode, decision, created_at FROM resolutions WHERE sid = ?");
 
-  const sessions = learners.map(({ sid, created_at, qloo_level, qloo_forced }) => {
+  const sessions = learners.map(({ sid, created_at, qloo_level, qloo_forced, synthetic }) => {
     const b = beacons.all(sid).map((r) => ({ event: r.event, at: r.created_at, ...safeJson(r.data) }));
     const c = calls.all(sid), f = firsts.all(sid), cu = cues.all(sid), a = attempts.all(sid), d = drafts.all(sid), r = resolutions.all(sid);
     const gates = b.filter((x) => x.event === "gate"), mics = b.filter((x) => x.event === "mic");
@@ -30,7 +32,7 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
     const stage = correct ? "correct" : a.length ? "practice" : picks.length ? "pick" : f.length ? "lesson" : readOk || r.some((x) => x.term_id || x.decision) ? "read" : live ? "gate" : "visited";
     const lastSeen = Math.max(created_at, ...b.map((x) => x.at), ...c.map((x) => x.created_at), ...f.map((x) => x.created_at), ...cu.map((x) => x.created_at), ...a.map((x) => x.created_at));
     return {
-      sid: sid.slice(0, 8), started_at: created_at, last_seen: lastSeen, stage, level: qloo_level ?? null, level_forced: Boolean(qloo_forced),
+      sid: sid.slice(0, 8), started_at: created_at, last_seen: lastSeen, stage, level: qloo_level ?? null, level_forced: Boolean(qloo_forced), persona: synthetic ?? null,
       gate: last ? { state: last.state ?? null, source: last.source ?? null, error: last.error ?? null, in_app: last.in_app ?? null, platform: last.platform ?? null, slow: Boolean(last.slow) } : null,
       mic: mic ? { state: mic.state ?? null, error: mic.error ?? null } : null,
       reads: { tried: reads.length, ok: readOk }, captures,
@@ -39,8 +41,11 @@ export function testersReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
       practice: { answers: a.length, correct, independent }, drafted: d.map((x) => x.word), errors,
     };
   });
-  const funnel = Object.fromEntries(STAGES.map((s, i) => [s, sessions.filter((x) => STAGES.indexOf(x.stage) >= i).length]));
-  return { since, sessions: sessions.length, funnel, rows: sessions };
+  const real = sessions.filter((x) => !x.persona), simulated = sessions.filter((x) => x.persona);
+  const rows = include ? sessions : real;
+  const funnelOf = (xs) => Object.fromEntries(STAGES.map((s, i) => [s, xs.filter((x) => STAGES.indexOf(x.stage) >= i).length]));
+  return { since, sessions: rows.length, funnel: funnelOf(rows), rows, include_synthetic: include,
+    synthetic: { sessions: simulated.length, funnel: funnelOf(simulated), rows: include ? [] : simulated } };
 }
 
 function safeJson(s) { try { const v = JSON.parse(s ?? "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; } }
@@ -48,17 +53,20 @@ function safeJson(s) { try { const v = JSON.parse(s ?? "{}"); return v && typeof
 // A plain-text table for a terminal.
 export function testersText(report) {
   const t = (ms) => new Date(ms).toISOString().slice(5, 16).replace("T", " ");
-  const lines = [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}`,
+  const syn = report.synthetic ?? { sessions: 0, rows: [] };
+  const lines = [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}${syn.sessions ? report.include_synthetic ? ` (${syn.sessions} synthetic included)` : ` real (+${syn.sessions} synthetic, below)` : ""}`,
     "funnel: " + STAGES.map((s) => `${s} ${report.funnel[s]}`).join(" > "), ""];
-  const head = ["sid", "started", "lvl", "stage", "gate", "src", "where", "mic", "reads", "lessons", "picks", "voice", "practice", "drafted", "errors"];
-  const rows = report.rows.map((r) => [r.sid, t(r.started_at), r.level == null ? "-" : `${r.level}${r.level_forced ? "!" : ""}`, r.stage,
+  const head = ["sid", "started", "lvl", "persona", "stage", "gate", "src", "where", "mic", "reads", "lessons", "picks", "voice", "practice", "drafted", "errors"];
+  const rowOf = (r) => [r.sid, t(r.started_at), r.level == null ? "-" : `${r.level}${r.level_forced ? "!" : ""}`, r.persona ?? "-", r.stage,
     r.gate ? `${r.gate.state}${r.gate.slow ? "+slow" : ""}${r.gate.error ? ` ${r.gate.error}` : ""}` : "-", r.gate?.source ?? "-",
     r.gate ? `${r.gate.platform ?? "?"}${r.gate.in_app ? ` in ${r.gate.in_app}` : ""}` : "-",
     r.mic ? `${r.mic.state}${r.mic.error ? ` ${r.mic.error}` : ""}` : "-",
     `${r.reads.ok}/${r.reads.tried}`, r.lessons.join(",") || "-", `${r.picks}${r.taste_picks ? ` (${r.taste_picks} taste)` : ""}`, String(r.voice_lines),
-    `${r.practice.correct}/${r.practice.answers}${r.practice.independent ? ` (${r.practice.independent} own)` : ""}`, r.drafted.join(",") || "-", [...new Set(r.errors)].join(",") || "-"]);
-  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => String(r[i]).length)));
+    `${r.practice.correct}/${r.practice.answers}${r.practice.independent ? ` (${r.practice.independent} own)` : ""}`, r.drafted.join(",") || "-", [...new Set(r.errors)].join(",") || "-"];
+  const rows = report.rows.map(rowOf), synRows = syn.rows.map(rowOf);
+  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => String(r[i]).length), ...synRows.map((r) => String(r[i]).length)));
   const fmt = (r) => r.map((c, i) => String(c).padEnd(widths[i])).join("  ");
   lines.push(fmt(head), fmt(widths.map((w) => "-".repeat(w))), ...rows.map(fmt));
+  if (synRows.length) lines.push("", `synthetic learners (simulated personas; practice is scripted, not retention): ${syn.sessions}`, fmt(head), fmt(widths.map((w) => "-".repeat(w))), ...synRows.map(fmt));
   return lines.join("\n") + "\n";
 }

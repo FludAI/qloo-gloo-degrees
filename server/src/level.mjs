@@ -63,5 +63,5 @@ export function levelInfo(sid) {
   const arm = armFor(sid);
   const row = q.getLevel.get(sid) ?? {};
   return { level, degree: level == null ? null : DEGREES[level], forced: Boolean(row.qloo_forced), assigned_at: row.qloo_level_at ?? null, degrees: DEGREES,
-    model: { arm, forced: Boolean(row.model_forced), arms: ARMS, available: availability() } };
+    model: { arm, forced: Boolean(row.model_forced), arms: ARMS, available: availability() }, synthetic: row.synthetic ?? null };
 }

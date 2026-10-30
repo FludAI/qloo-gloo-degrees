@@ -78,7 +78,16 @@ if (!db.prepare("PRAGMA table_info(first_attempts)").all().some((c) => c.name ==
   for (const [col, type] of [["qloo_level", "INTEGER"], ["qloo_forced", "INTEGER NOT NULL DEFAULT 0"], ["qloo_level_at", "INTEGER"], ["model_arm", "TEXT"], ["model_forced", "INTEGER NOT NULL DEFAULT 0"]]) {
     if (!cols.includes(col)) db.exec(`ALTER TABLE learners ADD COLUMN ${col} ${type}`);
   }
-  if (!db.prepare("PRAGMA table_info(pick_offers)").all().some((c) => c.name === "build_ms")) db.exec("ALTER TABLE pick_offers ADD COLUMN build_ms REAL");
+  const offers = db.prepare("PRAGMA table_info(pick_offers)").all().map((c) => c.name);
+  if (!offers.includes("build_ms")) db.exec("ALTER TABLE pick_offers ADD COLUMN build_ms REAL");
+  if (!offers.includes("reason")) db.exec("ALTER TABLE pick_offers ADD COLUMN reason TEXT"); // why a card stayed editorial (taste.mjs), for the degrees report
+  // A simulated learner (scripts/simulate-learner.mjs): the persona slug, set only with the sim token; the reports keep these rows apart.
+  if (!cols.includes("synthetic")) db.exec("ALTER TABLE learners ADD COLUMN synthetic TEXT");
+  // The arm judge (judge.mjs): a hook's sound-match score with the provider and model that gave it.
+  const cues = db.prepare("PRAGMA table_info(learner_cues)").all().map((c) => c.name);
+  for (const [col, type] of [["judge_score", "INTEGER"], ["judge_provider", "TEXT"], ["judge_model", "TEXT"], ["judge_reason", "TEXT"]]) {
+    if (!cues.includes(col)) db.exec(`ALTER TABLE learner_cues ADD COLUMN ${col} ${type}`);
+  }
   // Model calls (providers.mjs): which model answered, what it cost in tokens, and whether the arm asked for fell back.
   const calls = db.prepare("PRAGMA table_info(provider_calls)").all().map((c) => c.name);
   for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"], ["stop", "TEXT"], ["note", "TEXT"], ["brief", "INTEGER"]]) {
@@ -91,7 +100,10 @@ export const q = {
   ensureLearner: db.prepare("INSERT OR IGNORE INTO learners (sid, created_at) VALUES (?, ?)"),
   isUnlocked: db.prepare("SELECT unlocked FROM learners WHERE sid = ?"),
   unlock: db.prepare("UPDATE learners SET unlocked = 1 WHERE sid = ?"),
-  getLevel: db.prepare("SELECT qloo_level, qloo_forced, qloo_level_at, model_arm, model_forced FROM learners WHERE sid = ?"),
+  getLevel: db.prepare("SELECT qloo_level, qloo_forced, qloo_level_at, model_arm, model_forced, synthetic FROM learners WHERE sid = ?"),
+  setSynthetic: db.prepare("UPDATE learners SET synthetic = ? WHERE sid = ?"),
+  cueByLabel: db.prepare("SELECT id, label, connection FROM learner_cues WHERE sid = ? AND term_id = ? AND role = ? AND source = 'pick' AND removed_at IS NULL AND lower(label) = lower(?) ORDER BY created_at DESC LIMIT 1"),
+  judgeCue: db.prepare("UPDATE learner_cues SET judge_score = ?, judge_provider = ?, judge_model = ?, judge_reason = ? WHERE id = ? AND sid = ?"),
   setLevel: db.prepare("UPDATE learners SET qloo_level = ?, qloo_forced = ?, qloo_level_at = ? WHERE sid = ?"),
   setArm: db.prepare("UPDATE learners SET model_arm = ?, model_forced = ? WHERE sid = ?"),
   getFirst: db.prepare("SELECT * FROM first_attempts WHERE sid = ? AND term_id = ?"),
@@ -120,7 +132,7 @@ export const q = {
   pickSignals: db.prepare(`SELECT qloo_entity_id, qloo_entity, qloo_type, MAX(created_at) AS at FROM learner_cues
     WHERE sid = ? AND removed_at IS NULL AND source = 'pick' AND (qloo_entity_id IS NOT NULL OR qloo_entity IS NOT NULL)
     GROUP BY COALESCE(qloo_entity_id, qloo_entity) ORDER BY at DESC LIMIT 10`),
-  putOffer: db.prepare("INSERT OR REPLACE INTO pick_offers (sid, term_id, role, tailored, options, signals, at, build_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+  putOffer: db.prepare("INSERT OR REPLACE INTO pick_offers (sid, term_id, role, tailored, options, signals, at, build_ms, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   getOffer: db.prepare("SELECT tailored, options, signals, at FROM pick_offers WHERE sid = ? AND term_id = ? AND role = ?"),
   hooksFor: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND term_id = ? AND removed_at IS NULL AND source = 'pick' GROUP BY hook_source"),
   hooksAll: db.prepare("SELECT hook_source, COUNT(*) AS n FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND source = 'pick' GROUP BY hook_source"),

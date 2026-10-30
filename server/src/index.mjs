@@ -35,6 +35,7 @@ import * as credits from "./credits.mjs";
 import { levelFor, forceLevel, levelInfo, parseLevel, armFor, forceArm, parseArm } from "./level.mjs";
 import { availability as modelAvailability, MODELS } from "./providers.mjs";
 import { qlooCards, CANDIDATES } from "./cards.mjs";
+import { judgeHook, JUDGE_PROVIDER } from "./judge.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -45,6 +46,9 @@ let snapshots = null; // the snapshot timer (snapshot.mjs), once the server list
 const PASSCODE = String(process.env.DEMO_PASSCODE ?? "").trim();
 // Owner token for the lesson API and the /edit console. Separate from the passcode; unset = owner API off.
 const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN ?? "").trim();
+// The sim token (scripts/simulate-learner.mjs): a request carrying it may mark its session as a synthetic learner
+// and ask the arm judge. Unset = no request can mark a session, whatever headers it sends.
+const SIM_TOKEN = String(process.env.SIM_TOKEN ?? "").trim();
 
 // Optional extra terms from a module outside this repo (GLOO_ENGINE_MODULE). Absent = bundled samples only.
 let ENGINE = "gloo-open";
@@ -107,6 +111,9 @@ app.use((req, res, next) => {
   // The model arm the same way: ?model=meta|anthropic forces it (providers.mjs), else drawn once.
   const arm = parseArm(Array.isArray(req.query.model) ? req.query.model[0] : req.query.model);
   req.arm = arm != null ? forceArm(sid, arm) : armFor(sid);
+  // A simulated learner: the persona slug marks the row, only with the sim token beside it (no public way to mark).
+  const persona = String(req.headers["x-gloo-synthetic"] ?? "");
+  if (/^[a-z0-9][a-z0-9-]{0,39}$/.test(persona) && isSim(req)) q.setSynthetic.run(persona, sid);
   next();
 });
 // Behind Cloud Run's proxy the client address is the first forwarded hop. Only ever hashed with a secret, for the referral soft signal.
@@ -116,7 +123,11 @@ const originOf = (req) => process.env.PUBLIC_URL?.replace(/\/$/, "") || `${req.h
 const unlocked = (sid) => !PASSCODE || Boolean(q.isUnlocked.get(sid)?.unlocked);
 const locked = (res) => res.status(401).json({ error: "This demo needs a passcode for camera, voice and the agent.", code: "PASSCODE_REQUIRED" });
 // The owner's token opens the gated routes too (the /edit console uses voice without a passcode).
-const isOwner = (req) => { const given = String(req.headers["x-gloo-admin"] ?? "").trim(); const sha = (s) => createHash("sha256").update(s).digest(); return Boolean(ADMIN_TOKEN && given) && timingSafeEqual(sha(given), sha(ADMIN_TOKEN)); };
+const sameSecret = (given, secret) => { const sha = (s) => createHash("sha256").update(s).digest(); return Boolean(secret && given) && timingSafeEqual(sha(given), sha(secret)); };
+const isOwner = (req) => sameSecret(String(req.headers["x-gloo-admin"] ?? "").trim(), ADMIN_TOKEN);
+const isSim = (req) => sameSecret(String(req.headers["x-gloo-sim-token"] ?? "").trim(), SIM_TOKEN);
+// The sim gate: the sim token or the owner's. 401 otherwise, with nothing said about whether a token is configured.
+const sim = (req, res, next) => (isSim(req) || isOwner(req) ? next() : res.status(401).json({ error: "Sim token required.", code: "SIM_TOKEN_REQUIRED" }));
 const gate = (req, res, next) => (unlocked(req.sid) || isOwner(req) ? next() : locked(res));
 
 // Owner gate: x-gloo-admin must equal ADMIN_TOKEN. 401 without a header, 403 on a mismatch, 503 when the server has no token.
@@ -162,6 +173,7 @@ app.get("/api/health", wrap(async (req, res) => {
     gated: Boolean(PASSCODE), unlocked: unlocked(req.sid), admin: Boolean(ADMIN_TOKEN), lessons: listTerms().length, engine: ENGINE, schedule_policy: POLICY.version,
     credits: { rules: credits.RULES, welcome: credits.CONFIG.welcome, word: credits.CONFIG.word, referral: credits.CONFIG.referral },
     memory: { snapshots: snapshotsEnabled() ? "on" : "off", every_ms: SNAPSHOT_EVERY_MS, instances_assumed: 1, restored_from: restoredFrom(), last_snapshot: snapshots?.last() ?? null, brief_reads: briefReadsOn() ? "on" : "off" },
+    synthetic: { marking: SIM_TOKEN ? "on" : "off", persona: q.getLevel.get(req.sid)?.synthetic ?? null, judge: JUDGE_PROVIDER },
     unavailable: ["pronunciation scoring", "glasses input", "mastery bonus", "encounter detection"] });
 }));
 
@@ -656,7 +668,7 @@ app.get("/api/admin/lessons", admin, (req, res) => res.json(lessons.summaries())
 // The testers report: every session since ?hours (default 48), where it stopped, what went wrong. ?format=text for a terminal.
 app.get("/api/admin/testers", admin, (req, res) => {
   const hours = Math.min(24 * 30, Math.max(0.1, Number(req.query.hours ?? 48) || 48));
-  const report = testersReport(db, { since: Date.now() - hours * 3600e3 });
+  const report = testersReport(db, { since: Date.now() - hours * 3600e3, include: req.query.include === "synthetic" });
   if (req.query.format === "text") return res.type("text/plain").send(restoredLine() + testersText(report));
   res.json({ ...report, restored_from: restoredFrom() });
 });
@@ -664,10 +676,31 @@ app.get("/api/admin/testers", admin, (req, res) => {
 // The degrees report: the same window, split by degree of Qloo: cards, picks, pictures, practice, recall, calls, latency.
 app.get("/api/admin/degrees", admin, (req, res) => {
   const hours = Math.min(24 * 30, Math.max(0.1, Number(req.query.hours ?? 48) || 48));
-  const report = degreesReport(db, { since: Date.now() - hours * 3600e3 });
+  const report = degreesReport(db, { since: Date.now() - hours * 3600e3, include: req.query.include === "synthetic" });
   if (req.query.format === "text") return res.type("text/plain").send(restoredLine() + degreesText(report));
   res.json({ ...report, restored_from: restoredFrom() });
 });
+// The arm judge (judge.mjs), for the simulator: scores this session's pick for a role 0-3 on sound match and keeps
+// the score on the cue row with the provider and model that gave it. Mock Qloo without a model: unavailable.
+app.post("/api/sim/judge", sim, wrap(async (req, res) => {
+  const t = termFor(req.sid, req.body?.term_id);
+  if (!t) return res.status(404).json({ error: "unknown term" });
+  const role = t.roles.find((r) => r.id === req.body?.role);
+  if (!role) return res.status(400).json({ error: "unknown role" });
+  const label = String(req.body?.label ?? "").trim().slice(0, 80);
+  const cue = label ? q.cueByLabel.get(req.sid, t.id, role.id, label) : null;
+  if (!cue) return res.status(404).json({ error: "no such pick on this session" });
+  if (agentMode() !== "live") return res.status(503).json({ status: "unavailable", error: "The judge needs a model, which isn't configured here." });
+  const provider = parseArm(req.body?.provider) ?? JUDGE_PROVIDER;
+  const t0 = performance.now();
+  let out;
+  try { out = await judgeHook({ word: t.title, part: role.part ?? role.label, sound_like: role.sound_like ?? null, label: cue.label, connection: cue.connection, provider, sid: req.sid }); }
+  catch (e) { q.logModel.run(req.sid, e.provider ?? provider, "judge_hook", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0); console.error("judge_hook:", e.message);
+    return res.status(502).json({ status: "error", error: "The judge did not answer." }); }
+  q.judgeCue.run(out.score, out.provider, out.model, out.reason, cue.id, req.sid);
+  res.json({ status: "ok", cue_id: cue.id, label: cue.label, part: role.part ?? role.label, ...out });
+}));
+
 // The line a report opens with after a restore: the memory the rows come from spans a redeploy.
 const restoredLine = () => { const r = restoredFrom(); return r ? `restored from the snapshot taken ${new Date(r.taken_at).toISOString()}${r.revision ? ` by ${r.revision}` : ""}${r.late ? " (late, before any write here)" : ""}\n\n` : ""; };
 

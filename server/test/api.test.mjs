@@ -4,11 +4,12 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createGlooClient, TOOLS } from "../../scripts/gloo-lessons-mcp.mjs";
+import { simulate, favoriteOn, parseArgs, FIXTURES } from "../../scripts/simulate-learner.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -65,8 +66,15 @@ before(async () => {
         return res.end(JSON.stringify({ audioContent: Buffer.from(`MP3|${parsed.voice?.name}|${parsed.input?.ssml}`).toString("base64"), timepoints: names.map((n, i) => ({ markName: n, timeSeconds: 0.25 * i })) }));
       }
       const offered = (parsed.tools ?? []).map((t) => t.name);
-      const forcedTool = ["resolve_term", "draft_lesson", "read_word", "suggest_field", "review_lesson"].find((n) => offered.includes(n));
+      const forcedTool = ["resolve_term", "draft_lesson", "read_word", "suggest_field", "review_lesson", "judge_hook"].find((n) => offered.includes(n));
       res.setHeader("content-type", "application/json");
+      if (forcedTool === "judge_hook") {
+        // The arm judge: the hook name and the part reach the model, nothing else about the learner; Pepsi carries "chole" a little, anything else a lot.
+        const user = String(parsed.messages?.[0]?.content ?? "");
+        assert.match(user, /^Word: .+\nPart: /); assert.ok(!user.includes("gloo_sid"));
+        const score = /Hook name: Pepsi/.test(user) ? 1 : 2;
+        return res.end(JSON.stringify(reply([{ type: "tool_use", id: "j1", name: "judge_hook", input: { score, reason: "fake judge" } }])));
+      }
       if (forcedTool === "review_lesson") {
         // The reviewer: the deterministic findings and the owner's instruction reach the model; it answers with a mix of
         // good proposals and ones the server must drop (bad path, no change, invalid value, an answer its rubric rejects).
@@ -137,7 +145,7 @@ before(async () => {
   proc = spawn(process.execPath, [SERVER, "--mock"], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: ":memory:", ANTHROPIC_API_KEY: "test-not-a-key", ANTHROPIC_BASE_URL: "http://localhost:8798",
       TTS_ENDPOINT: "http://localhost:8798/tts", MEDIA_LOCAL: "1", MEDIA_DIR: mkdtempSync(join(tmpdir(), "gloo-api-media-")), LIMIT_TTS_PER_SESSION_HOUR: "2",
-      ADMIN_TOKEN: "test-owner-token", QLOO_LEVELS: "1", // every session draws degree 1 (production's behavior); the degrees test forces others
+      ADMIN_TOKEN: "test-owner-token", SIM_TOKEN: "test-sim-token", QLOO_LEVELS: "1", // every session draws degree 1 (production's behavior); the degrees test forces others
       META_API_KEY: "test-muse-key", META_BASE_URL: "http://localhost:8798/muse", MODEL_ARMS: "anthropic" }, // the fake Meta backend; sessions draw the anthropic arm unless forced
     stdio: "ignore",
   });
@@ -150,9 +158,9 @@ after(() => { proc?.kill(); fake?.close(); });
 
 const session = () => {
   let cookie = "";
-  return async (method, path, body) => {
+  return async (method, path, body, headers = {}) => {
     const res = await fetch(`http://localhost:${PORT}${path}`, {
-      method, headers: { ...(cookie && { cookie }), ...(body && { "content-type": "application/json" }) },
+      method, headers: { ...headers, ...(cookie && { cookie }), ...(body && { "content-type": "application/json" }) },
       body: body && JSON.stringify(body),
     });
     const set = res.headers.get("set-cookie");
@@ -271,6 +279,10 @@ test("taste: two picks become Qloo signals and the next pick cards are ranked fo
   assert.ok(n >= 1 && n <= 3, `calls: ${n}`);
   assert.ok((await s("GET", "/api/health")).body.taste.entities >= 4, "IDs learned from the describes and the rank answer");
 
+  // The kin card (one entity) is counted on the report as a card rank had nothing to compare.
+  const rep = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+  assert.ok(rep.levels.find((l) => l.level === 1).unrankable_cards >= 1);
+  assert.match(await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text(), /\b1-type\b/);
   // A pick from a ranked card is a hook from taste; the progress card says so.
   cues = await pick("in", "Penguin");
   const inCue = cues.find((c) => c.role === "in");
@@ -548,7 +560,11 @@ test("degree 2: a new word's pick cards are built from Qloo: more candidates ask
   assert.ok(kept.length >= 4 && kept.length <= 8, `${kept.length} resolved`);
   assert.ok(role.pick.options.length <= 8 && role.pick.options.length >= 4);
   assert.ok(kept.every((o) => o.qloo.entity_id.startsWith("mock-") && o.qloo.popularity >= 0.3 && o.qloo.type && o.wiki));
-  for (let i = 1; i < kept.length; i++) assert.ok(kept[i - 1].qloo.popularity >= kept[i].qloo.popularity, "most popular first");
+  // Names that pair up by type lead (the brands here), most popular first within the group; the lone artist, film and show follow.
+  const brands = kept.filter((o) => o.qloo.type === "brand");
+  assert.ok(brands.length >= 2 && kept.slice(0, brands.length).every((o) => o.qloo.type === "brand"), "the pair group leads the card");
+  for (let i = 1; i < brands.length; i++) assert.ok(brands[i - 1].qloo.popularity >= brands[i].qloo.popularity, "most popular first within the group");
+  assert.deepEqual(role.pick.built.rankable, ["brand"]);
   assert.ok(!role.pick.options.some((o) => o.name === "Obscure Peri Band" && o.qloo?.entity_id), "a name Qloo doesn't know carries no ID");
   assert.equal(role.pick.options[0].image, null, "the mock graph has no pictures: wiki art is the fallback");
   const other = term.roles.find((r) => r.id === "stalsis");
@@ -786,6 +802,105 @@ test("learner brief: built after a word, a pick and an answer; the drafter and t
   // Delete takes the brief with it.
   await s("DELETE", "/api/learner");
   assert.equal((await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/brief`, { headers: { "x-gloo-admin": "test-owner-token" } })).status, 404);
+});
+
+test("synthetic learners: the mark needs the sim token, shows on /api/level and health, keeps the session out of both reports' real figures unless included, and the arm judge scores a pick onto its row", async () => {
+  const marked = (slug, token) => { const s = session(); return (m, p, b) => s(m, p, b, { "x-gloo-synthetic": slug, ...(token ? { "x-gloo-sim-token": token } : {}) }); };
+  // Without the token, or with a wrong one, the header does nothing and nothing says why.
+  for (const bad of [marked("marty-mcfly", null), marked("marty-mcfly", "wrong-token"), marked("Not A Slug!", "test-sim-token")]) assert.equal((await bad("GET", "/api/level")).body.synthetic, null);
+  const s = marked("marty-mcfly", "test-sim-token");
+  const lv = (await s("GET", "/api/level?qloo=2")).body;
+  assert.equal(lv.synthetic, "marty-mcfly"); assert.equal(lv.level, 2);
+  const h = (await s("GET", "/api/health")).body;
+  assert.deepEqual(h.synthetic, { marking: "on", persona: "marty-mcfly", judge: "anthropic" });
+  assert.equal((await session()("GET", "/api/health")).body.synthetic.persona, null);
+  // The synthetic session picks on a reviewed lesson and answers; a real session does the same at the same level.
+  const play = async (c) => {
+    await c("POST", "/api/terms/cholecystokinin/first-attempt", { skipped: true });
+    const term = (await c("GET", "/api/terms/cholecystokinin")).body;
+    const o = term.roles.find((r) => r.id === "chole").pick.options.find((x) => x.name === "Pepsi-Cola");
+    await c("POST", "/api/learner/cues", { term_id: "cholecystokinin", role: "chole", label: o.name, connection: o.connection, source: "pick", recognized: true, qloo_entity_type: o.qloo?.type });
+    await c("POST", "/api/attempts", { prompt_id: "cck-chole", response: "bile", idempotency_key: `syn-${Math.random().toString(36).slice(2, 12)}` });
+  };
+  const real = session(); await real("GET", "/api/level?qloo=2"); await play(real); await play(s);
+  const admin = { headers: { "x-gloo-admin": "test-owner-token" } };
+  const d = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, admin)).json();
+  const two = (r) => r.cells.find((c) => c.level === 2 && c.arm === "anthropic");
+  assert.equal(d.include_synthetic, false); assert.ok(d.synthetic_sessions >= 1);
+  assert.equal(d.synthetic.sessions, d.synthetic_sessions); assert.equal(d.synthetic.included, false);
+  const persona = d.synthetic.personas.find((p) => p.persona === "marty-mcfly" && p.level === 2);
+  assert.ok(persona && persona.sessions >= 1 && persona.picks >= 1 && persona.answers >= 1, JSON.stringify(persona));
+  assert.equal(persona.arm, "anthropic"); assert.equal(persona.sound_match, null);
+  const merged = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&include=synthetic`, admin)).json();
+  assert.equal(merged.include_synthetic, true);
+  assert.equal(merged.synthetic_sessions, d.synthetic_sessions); assert.ok(merged.sessions >= d.sessions + d.synthetic_sessions, "merged counts every session (the report's own cookie-less fetches add real ones)");
+  assert.equal(two(merged).sessions, two(d).sessions + d.synthetic.cells.find((c) => c.level === 2 && c.arm === "anthropic").sessions);
+  const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, admin)).text();
+  assert.match(text, /real \(\+\d+ synthetic, below\)/); assert.match(text, /synthetic learners \(\d+ simulated sessions, kept out/); assert.match(text, /\nmarty-mcfly +2 +anthropic /); assert.match(text, /judged by a model/); assert.match(text, /practice \(scripted\)/);
+  const t = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1`, admin)).json();
+  assert.ok(t.rows.every((r) => r.persona === null), "no synthetic row among the real ones"); assert.ok(t.synthetic.rows.some((r) => r.persona === "marty-mcfly" && r.stage === "correct"));
+  assert.ok(t.synthetic.funnel.correct >= 1);
+  const tm = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1&include=synthetic`, admin)).json();
+  assert.ok(tm.rows.some((r) => r.persona === "marty-mcfly")); assert.deepEqual(tm.synthetic.rows, []); assert.ok(tm.sessions >= t.sessions + t.synthetic.sessions);
+  const tt = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1&format=text`, admin)).text();
+  assert.match(tt, /\bpersona\b/); assert.match(tt, /synthetic learners \(simulated personas/); assert.match(tt, / marty-mcfly +correct /);
+  // The arm judge: the token (or the owner's) opens it; the score lands on the cue row with its provider and model.
+  assert.equal((await session()("POST", "/api/sim/judge", { term_id: "cholecystokinin", role: "chole", label: "Pepsi-Cola" })).status, 401);
+  assert.equal((await s("POST", "/api/sim/judge", { term_id: "cholecystokinin", role: "chole", label: "Coca-Cola" })).status, 404, "not this session's pick");
+  const j = await s("POST", "/api/sim/judge", { term_id: "cholecystokinin", role: "chole", label: "pepsi-cola" });
+  assert.equal(j.status, 200, JSON.stringify(j.body));
+  assert.deepEqual([j.body.status, j.body.score, j.body.provider, j.body.model, j.body.part, j.body.label], ["ok", 1, "anthropic", "claude-sonnet-5-5", "chole", "Pepsi-Cola"]);
+  const cue = (await s("GET", "/api/export")).body.learner_cues.find((c) => c.role === "chole");
+  assert.deepEqual([cue.judge_score, cue.judge_provider, cue.judge_model, cue.judge_reason], [1, "anthropic", "claude-sonnet-5-5", "fake judge"]);
+  assert.ok((await s("GET", "/api/export")).body.provider_calls.some((c) => c.op === "judge_hook" && c.status === "ok"));
+  const d2 = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, admin)).json();
+  const judged = d2.synthetic.personas.find((p) => p.persona === "marty-mcfly" && p.level === 2);
+  assert.equal(judged.judged, 1); assert.equal(judged.sound_match, 1);
+  assert.equal(two(d2).judged, 0, "the real cell was not judged");
+  assert.match(await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, admin)).text(), /\nmarty-mcfly +2 +anthropic .* 1 \(1\) *\n/);
+});
+
+test("the simulator's dry run against the mock server: a fixture persona plays two words at degree 2, the rows carry cards, favorite ranks, scripted practice and spend, the file is written, and the judge scores the picks when asked", async () => {
+  assert.deepEqual(favoriteOn([{ name: "Coca-Cola", qloo: { entity: "Coca-Cola" } }, { name: "Pepsi-Cola", qloo: { entity: "Pepsi" } }], FIXTURES["marty-mcfly"].likes), { rank: 1, option: { name: "Pepsi-Cola", qloo: { entity: "Pepsi" } } });
+  assert.equal(favoriteOn([{ name: "RC Cola" }], FIXTURES["ferris-bueller"].likes).rank, null);
+  assert.throws(() => parseArgs(["--level", "7", "--persona", "fixture:marty-mcfly"]), /0, 1, 2 or 3/);
+  const out = mkdtempSync(join(tmpdir(), "gloo-sim-"));
+  const prev = process.env.SIM_TOKEN; process.env.SIM_TOKEN = "test-sim-token";
+  const logged = [];
+  try {
+    // Without the token on the server's side of the handshake the run refuses to play (the mark did not come back).
+    process.env.SIM_TOKEN = "wrong";
+    await assert.rejects(simulate(parseArgs(["--base", `http://localhost:${PORT}`, "--persona", "fixture:marty-mcfly", "--level", "2", "--dry-run", "--quiet"])), /did not accept the synthetic mark/);
+    process.env.SIM_TOKEN = "test-sim-token";
+    const r = await simulate(parseArgs(["--base", `http://localhost:${PORT}`, "--persona", "fixture:marty-mcfly", "--level", "2", "--model", "anthropic", "--words", "2", "--dry-run", "--out", out]), { log: (m) => logged.push(m) });
+    const [run, cck, peri, summary] = r.lines;
+    assert.deepEqual([run.kind, run.persona, run.level, run.arm, run.synthetic, run.judge, run.dry_run], ["run", "marty-mcfly", 2, "anthropic", "marty-mcfly", "off", true]);
+    assert.match(run.practice_rule, /taste-blind/);
+    assert.deepEqual([cck.kind, cck.word, cck.term_id, cck.created], ["word", "cholecystokinin", "cholecystokinin", false]);
+    const chole = cck.cards.find((c) => c.role === "chole");
+    assert.deepEqual([chole.favorite_rank, chole.chosen, chole.via, chole.hook_source, chole.entity_id, chole.ranked, chole.judge], [1, "Pepsi-Cola", "like", "editorial", "mock-pepsi", false, null]);
+    const cysto = cck.cards.find((c) => c.role === "cysto");
+    assert.deepEqual([cysto.favorite_rank, cysto.chosen_rank, cysto.via], [null, 0, "first"], "no like on the card: the first tile");
+    assert.ok(cck.cards.every((c) => typeof c.seconds.card === "number" && typeof c.seconds.pick === "number" && c.seconds.pick >= c.seconds.card));
+    assert.ok(cck.practice.length >= 3 && cck.practice.every((p) => ["correct", "incorrect", "partial", "uncertain"].includes(p.outcome)), JSON.stringify(cck.practice));
+    assert.ok(cck.cards.slice(2).some((c) => c.ranked), "the cards still ahead come back ranked once two picks are in (the lesson reloads after each pick)");
+    assert.ok(cck.spend.qloo_calls >= 1 && cck.spend.model_calls === 0, JSON.stringify(cck.spend));
+    assert.equal(cck.first_attempt, "say");
+    assert.deepEqual([peri.word, peri.created, peri.built?.source], ["peristalsis", true, "qloo"], "a new word is drafted and its cards built at degree 2");
+    assert.ok(peri.spend.model_calls >= 1 && peri.spend.tokens_out >= 1 && peri.spend.qloo_calls >= 1, JSON.stringify(peri.spend));
+    assert.deepEqual([summary.kind, summary.words, summary.drafted, summary.errors], ["summary", 2, 1, 0]);
+    assert.ok(summary.cards >= 5 && summary.answers >= 4);
+    assert.equal(readFileSync(r.file, "utf8").trim().split("\n").length, 4, "run, two words, summary");
+    assert.ok(logged.some((m) => /^run .*Marty McFly at degree 2/.test(m)));
+    // Judged (not a dry run): every pick gets a score from the fake judge and the report's persona row shows the mean.
+    const j = await simulate(parseArgs(["--base", `http://localhost:${PORT}`, "--persona", "fixture:ferris-bueller", "--level", "1", "--words", "1", "--arm-judge", "on", "--out", out, "--quiet"]));
+    const word = j.lines[1];
+    assert.ok(word.cards.length >= 2 && word.cards.every((c) => c.judge?.score === 2 && c.judge.provider === "anthropic" && c.judge.model === "claude-sonnet-5-5"), JSON.stringify(word.cards.map((c) => c.judge)));
+    assert.equal(j.summary.sound_match, 2); assert.equal(j.summary.judged, word.cards.length);
+    const d = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+    const ferris = d.synthetic.personas.find((p) => p.persona === "ferris-bueller");
+    assert.equal(ferris.sound_match, 2); assert.equal(ferris.level, 1);
+  } finally { if (prev == null) delete process.env.SIM_TOKEN; else process.env.SIM_TOKEN = prev; }
 });
 
 test("owner: 401 without the header, 403 with the wrong token, 200 with the right one", async () => {

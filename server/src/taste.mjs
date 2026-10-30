@@ -215,7 +215,7 @@ export async function tailorTerm(term, sid, call, opts = {}) {
     roles.push(t);
     q.putOffer.run(sid, term.id, role.id, t.pick.tailoring.source === "taste" ? 1 : 0,
       JSON.stringify(t.pick.options.map((o) => ({ name: o.name, taste: o.taste ?? null, pic: picOf(o), wiki: o.wiki ?? null }))), JSON.stringify(signals), Date.now(),
-      Math.round(performance.now() - t0));
+      Math.round(performance.now() - t0), t.pick.tailoring.reason ?? null);
   }
   return { ...term, roles };
 }

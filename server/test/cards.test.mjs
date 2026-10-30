@@ -45,14 +45,14 @@ test("candidates are described once each, kept above the floor, sorted by popula
   assert.equal(out.cards.source, "qloo"); assert.equal(out.cards.describes, 10); assert.equal(out.cards.skipped, 0);
   const chole = out.roles[0].pick;
   assert.deepEqual(chole.options.map((o) => o.name), ["Pepsi", "Coca-Cola", "Sprite", "Fanta", "Inca Kola"]); // RC Cola under the floor, Nobody unknown
-  assert.deepEqual(chole.built, { source: "qloo", candidates: 7, resolved: 5, kept: 5, floor: 0.3 });
+  assert.deepEqual(chole.built, { source: "qloo", candidates: 7, resolved: 5, kept: 5, floor: 0.3, rankable: ["brand"] });
   assert.equal(chole.options[0].image, "https://images.qloo.com/i/id-pepsi.jpg");
   assert.deepEqual(chole.options[0].qloo, { entity: "Pepsi", type: "brand", entity_id: "id-pepsi", popularity: 0.99, image: "https://images.qloo.com/i/id-pepsi.jpg" });
   assert.equal(chole.options[3].image, null, "Fanta has no Qloo picture: the wiki title stays for the fallback");
   assert.equal(chole.options[3].wiki, "Fanta");
   assert.equal(chole.question, "Say your favorite cola.");
   const cysto = out.roles[1].pick;
-  assert.deepEqual(cysto.options.map((o) => o.name), ["Twisted Sister", "Sister Act", "Sisters", "Typed"]); // three resolved, padded to four with the untyped one
+  assert.deepEqual(cysto.options.map((o) => o.name), ["Sister Act", "Sisters", "Twisted Sister", "Typed"]); // the two films pair up and lead, the lone band follows, padded to four with the untyped one
   assert.equal(cysto.options[3].qloo, null);
   assert.deepEqual(out.roles[2], packet().roles[2], "a role without a pick is untouched");
   // The cache learned every record, so the same word again costs nothing.
@@ -108,6 +108,20 @@ test("a needs_input answer is settled once: the same-named candidate is learned,
   const again = await qlooCards(pk(), call, { budget: plenty });
   assert.equal(again.cards.describes, 0, "a settled name costs nothing the next time");
   assert.deepEqual(seen, ["Perry Mason", "Perry's Diner", "Perrier"]);
+});
+
+test("names that pair up by type lead a built card, the biggest pair group first, singletons after; the card says which types rank can compare", async () => {
+  const { call } = runner();
+  // Four types, one name each, would never be rankable (rank compares one type at a time); the two brands and the two films pair up.
+  const options = [opt("Twisted Sister", "artist"), opt("Sister Act", "movie"), opt("Pepsi", "brand"), opt("Sisters", "movie"), opt("Sprite", "brand")];
+  const out = await qlooCards({ id: "p-pairs", roles: [{ id: "cysto", part: "cysto", pick: { question: "Which sister?", options } }] }, call, { budget: plenty });
+  const pick = out.roles[0].pick;
+  assert.deepEqual(pick.options.map((o) => o.name), ["Pepsi", "Sprite", "Sister Act", "Sisters", "Twisted Sister"], "brands (two) first by popularity, films (two) next, the lone artist last");
+  assert.deepEqual(pick.built.rankable, ["brand", "movie"]);
+  // A role with a sound: a name that does not carry it does not make a pair, however popular.
+  const sounded = await qlooCards({ id: "p-pairs-2", roles: [{ id: "chole", part: "chole", sound_like: "cola", pick: { question: "Which cola?", options: [opt("Sister Act", "movie"), opt("Sisters", "movie"), opt("Pepsi"), opt("Coca-Cola"), opt("Inca Kola")] } }] }, call, { budget: plenty });
+  assert.deepEqual(sounded.roles[0].pick.options.map((o) => o.name), ["Pepsi", "Coca-Cola", "Inca Kola", "Sister Act", "Sisters"], "the brands pair up through the two colas that carry the sound; the films carry none, so two films make no pair");
+  assert.deepEqual(sounded.roles[0].pick.built.rankable, ["brand"]);
 });
 
 test("a card stops asking once it has enough popular names: the rest of the drafter's candidates are not described", async () => {

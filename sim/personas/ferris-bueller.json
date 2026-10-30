@@ -1,0 +1,295 @@
+{
+  "slug": "ferris-bueller",
+  "name": "Ferris Bueller",
+  "work": {
+    "title": "Ferris Bueller's Day Off",
+    "kind": "film",
+    "year": 1986
+  },
+  "manner": "Answers straight to camera as if the listener were an old friend, attaches a rule of life, and is sure it will all work out.",
+  "words_source": "transcript",
+  "likes": [
+    {
+      "name": "Ferrari",
+      "type": "brand",
+      "why": "He talks Cameron into taking his father's 1961 Ferrari 250 GT California for the day and asks whether anyone would bring a car like that straight back."
+    },
+    {
+      "name": "The Beatles",
+      "type": "artist",
+      "why": "He lip-syncs Twist and Shout from the parade float and quotes John Lennon: I don't believe in Beatles, I just believe in me."
+    },
+    {
+      "name": "Wayne Newton",
+      "type": "artist",
+      "why": "He sings Danke Schoen in the shower and again from the Von Steuben Day parade float."
+    },
+    {
+      "name": "Wrigley Field",
+      "type": "place",
+      "why": "He takes Cameron and Sloane to the Cubs game and catches a foul ball."
+    },
+    {
+      "name": "Art Institute of Chicago",
+      "type": "place",
+      "why": "The three of them spend part of the afternoon in its galleries."
+    },
+    {
+      "name": "Sears Tower",
+      "type": "place",
+      "why": "They lean their foreheads against the Skydeck glass and look down on the city."
+    },
+    {
+      "name": "Chez Quis",
+      "type": "place",
+      "why": "He talks his way into lunch there as Abe Froman, the Sausage King of Chicago."
+    },
+    {
+      "name": "Chicago Board of Trade",
+      "type": "place",
+      "why": "They watch the trading floor from the visitors' gallery."
+    }
+  ],
+  "words": [
+    {
+      "word": "infatuation",
+      "where": {
+        "scene": "Park"
+      }
+    },
+    {
+      "word": "barf",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "hippies",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "metals",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "damaging",
+      "where": {
+        "scene": "Family room"
+      }
+    },
+    {
+      "word": "strategic",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "ninth",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "frightening",
+      "where": {
+        "scene": "Gallery"
+      }
+    },
+    {
+      "word": "bonds",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "fluid",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "trudge",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "secretes",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "minutia",
+      "where": {
+        "scene": "Boat dock"
+      }
+    },
+    {
+      "word": "odometer",
+      "where": {
+        "scene": "Garage"
+      }
+    },
+    {
+      "word": "enriching",
+      "where": {
+        "scene": "Gallery"
+      }
+    },
+    {
+      "word": "fixable",
+      "where": {
+        "scene": "Ferrari"
+      }
+    },
+    {
+      "word": "colorless",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "phlegm",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "clammy",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "uncalled",
+      "where": {
+        "scene": "Ferris' kitchen"
+      }
+    },
+    {
+      "word": "enzymes",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "spasm",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "pacifist",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "grovel",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "socialists",
+      "where": {
+        "scene": "Bathroom"
+      }
+    },
+    {
+      "word": "cleverly",
+      "where": {
+        "scene": "House"
+      }
+    },
+    {
+      "word": "pancreas",
+      "where": {
+        "scene": "Taxi cab"
+      }
+    },
+    {
+      "word": "glimmer",
+      "where": {
+        "scene": "Sloane's backyard"
+      }
+    },
+    {
+      "word": "scenic",
+      "where": {
+        "scene": "Chicago river"
+      }
+    },
+    {
+      "word": "digestion",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "anarchists",
+      "where": {
+        "scene": "Bathroom"
+      }
+    },
+    {
+      "word": "vantage",
+      "where": {
+        "scene": "Sears tower"
+      }
+    },
+    {
+      "word": "shellfish",
+      "where": {
+        "scene": "Ferris' room"
+      }
+    },
+    {
+      "word": "generic",
+      "where": {
+        "scene": "Cameron's garage"
+      }
+    },
+    {
+      "word": "flunked",
+      "where": {
+        "scene": "Studio"
+      }
+    },
+    {
+      "word": "condone",
+      "where": {
+        "scene": "Hallway"
+      }
+    },
+    {
+      "word": "gland",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "metabolism",
+      "where": {
+        "scene": "Restaurant"
+      }
+    },
+    {
+      "word": "carousel",
+      "where": {
+        "scene": "Bedroom"
+      }
+    },
+    {
+      "word": "trait",
+      "where": {
+        "scene": "Gallery"
+      }
+    }
+  ]
+}

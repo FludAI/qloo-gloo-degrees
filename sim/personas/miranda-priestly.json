@@ -1,0 +1,295 @@
+{
+  "slug": "miranda-priestly",
+  "name": "Miranda Priestly",
+  "work": {
+    "title": "The Devil Wears Prada",
+    "kind": "film",
+    "year": 2006
+  },
+  "manner": "Answers in a near-whisper that expects to be obeyed, skips past the question to the task it implies, and closes with that's all.",
+  "words_source": "transcript",
+  "likes": [
+    {
+      "name": "Starbucks",
+      "type": "brand",
+      "why": "Her assistants run for her hot Starbucks coffee every morning and it must be on her desk when she arrives."
+    },
+    {
+      "name": "Hermès",
+      "type": "brand",
+      "why": "She drops her coat and bag on Andy's desk each day, and Emily guards the stock of Hermès scarves she wears."
+    },
+    {
+      "name": "Runway",
+      "type": "brand",
+      "why": "She is the editor-in-chief of the magazine and every scene in the office is about the next issue."
+    },
+    {
+      "name": "Calvin Klein",
+      "type": "brand",
+      "why": "She orders ten or fifteen skirts from Calvin Klein without saying which, and Andy has to find out."
+    },
+    {
+      "name": "Harry Potter",
+      "type": "book",
+      "why": "She demands the unpublished manuscript of the next book for her twins by that afternoon."
+    },
+    {
+      "name": "Patrick Demarchelier",
+      "type": "person",
+      "why": "The first call she needs Andy to place is to Patrick, and she asks whether Demarchelier confirmed."
+    },
+    {
+      "name": "James Holt",
+      "type": "person",
+      "why": "She champions the designer, previews his collection in his studio and plans to make him creative director."
+    },
+    {
+      "name": "Paris",
+      "type": "place",
+      "why": "Paris Fashion Week is the week of the year she will not miss, and she takes Andy over Emily."
+    }
+  ],
+  "words": [
+    {
+      "word": "cerulean",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "skirts",
+      "where": {
+        "scene": "Runway, Miranda's office"
+      }
+    },
+    {
+      "word": "layout",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "sweater",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "unattractive",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "gowns",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "publication",
+      "where": {
+        "scene": "Living room, night"
+      }
+    },
+    {
+      "word": "excellence",
+      "where": {
+        "scene": "Chateau, day"
+      }
+    },
+    {
+      "word": "recital",
+      "where": {
+        "scene": "Miami international airport, night"
+      }
+    },
+    {
+      "word": "designers",
+      "where": {
+        "scene": "Chateau, day"
+      }
+    },
+    {
+      "word": "starved",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "disappointing",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "accomplished",
+      "where": {
+        "scene": "Ritz hotel, Miranda's suite, evening"
+      }
+    },
+    {
+      "word": "paunchy",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "fortieth",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "tortes",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "satchels",
+      "where": {
+        "scene": "Runway, Miranda's office"
+      }
+    },
+    {
+      "word": "reshoot",
+      "where": {
+        "scene": "Calvin klein showroom, day"
+      }
+    },
+    {
+      "word": "swimwear",
+      "where": {
+        "scene": "Runway bullpen, day"
+      }
+    },
+    {
+      "word": "freesias",
+      "where": {
+        "scene": "Chateau, day"
+      }
+    },
+    {
+      "word": "compote",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "absurdly",
+      "where": {
+        "scene": "Limo, day"
+      }
+    },
+    {
+      "word": "glacial",
+      "where": {
+        "scene": "Ritz hotel, Miranda's suite, evening"
+      }
+    },
+    {
+      "word": "chiffon",
+      "where": {
+        "scene": "Runway, Miranda's office"
+      }
+    },
+    {
+      "word": "advertisers",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "abundantly",
+      "where": {
+        "scene": "Runway, Miranda's office"
+      }
+    },
+    {
+      "word": "reconsidered",
+      "where": {
+        "scene": "Limo, day"
+      }
+    },
+    {
+      "word": "groundbreaking",
+      "where": {
+        "scene": "Conference room, day"
+      }
+    },
+    {
+      "word": "denim",
+      "where": {
+        "scene": "Street, day"
+      }
+    },
+    {
+      "word": "worships",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "frigid",
+      "where": {
+        "scene": "Runway, Miranda's office"
+      }
+    },
+    {
+      "word": "slender",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "lumpy",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "incompetence",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    },
+    {
+      "word": "definitive",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "esteemed",
+      "where": {
+        "scene": "Chateau, day"
+      }
+    },
+    {
+      "word": "luncheon",
+      "where": {
+        "scene": "Ritz hotel, Miranda's suite, evening"
+      }
+    },
+    {
+      "word": "burgundy",
+      "where": {
+        "scene": "Runway, Miranda's office"
+      }
+    },
+    {
+      "word": "stylish",
+      "where": {
+        "scene": "Runway, Miranda's office, day"
+      }
+    },
+    {
+      "word": "rhubarb",
+      "where": {
+        "scene": "Runway, Hallway, day"
+      }
+    }
+  ]
+}

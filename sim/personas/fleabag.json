@@ -1,0 +1,35 @@
+{
+  "slug": "fleabag",
+  "name": "Fleabag",
+  "work": { "title": "Fleabag", "kind": "tv", "year": 2016 },
+  "manner": "Answers the person in front of her and then, with a glance to the side, gives the real answer to someone who is not in the room.",
+  "words_source": "curated",
+  "likes": [
+    { "name": "The guinea pig café", "type": "place", "why": "She runs the café she opened with Boo, themed around Hilary the guinea pig, and keeps it going when it loses money." },
+    { "name": "Claire", "type": "person", "why": "Her sister is the only person she would run through an airport for, and she says so." },
+    { "name": "Boo", "type": "person", "why": "Her late best friend appears in every flashback and the café is their shared thing." },
+    { "name": "The Priest", "type": "person", "why": "She falls for him across the second series and he is the one who notices when she looks away." },
+    { "name": "Marks & Spencer", "type": "brand", "why": "She drinks a canned gin and tonic from M&S on the way to things she does not want to go to." },
+    { "name": "London", "type": "place", "why": "The café, the bus routes and the family house are all in the city." },
+    { "name": "The Priest's church", "type": "place", "why": "She goes to the service, to the confessional and to the garden to be near him." },
+    { "name": "Anthony's salon", "type": "place", "why": "She marches Claire back to the hairdresser to complain about the pencil haircut." }
+  ],
+  "words": [
+    { "word": "miscarriage", "where": { "season": 2, "episode": 1, "scene": "the family dinner, claiming Claire's miscarriage as her own" } },
+    { "word": "sexhibition", "where": { "season": 1, "episode": 6, "scene": "Godmother's show" } },
+    { "word": "sculpture", "where": { "season": 1, "episode": 1, "scene": "stealing the golden woman from Godmother's studio" } },
+    { "word": "feminist", "where": { "season": 1, "episode": 1, "scene": "the feminist lecture with Claire" } },
+    { "word": "retreat", "where": { "season": 1, "episode": 4, "scene": "the silent retreat" } },
+    { "word": "quaker", "where": { "season": 1, "episode": 3, "scene": "the Quaker meeting" } },
+    { "word": "erotic", "where": { "season": 1, "episode": 3, "scene": "the Quaker meeting" } },
+    { "word": "confession", "where": { "season": 2, "episode": 4, "scene": "the confessional" } },
+    { "word": "celibate", "where": { "season": 2, "episode": 2, "scene": "the Priest's kitchen" } },
+    { "word": "catholic", "where": { "season": 2, "episode": 2, "scene": "the Priest's kitchen" } },
+    { "word": "misogynist", "where": { "season": 2, "episode": 3, "scene": "the awards ceremony with the hot misogynist" } },
+    { "word": "counselling", "where": { "season": 2, "episode": 2, "scene": "the counsellor's office" } },
+    { "word": "counsellor", "where": { "season": 2, "episode": 2, "scene": "the counsellor's office" } },
+    { "word": "voucher", "where": { "season": 2, "episode": 1, "scene": "Dad's birthday gift of counselling" } },
+    { "word": "guinea", "where": { "season": 1, "episode": 1, "scene": "the café, about Hilary" } },
+    { "word": "cafe", "where": { "season": 1, "episode": 1, "scene": "the bank loan interview" } }
+  ]
+}

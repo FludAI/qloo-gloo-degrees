@@ -1,0 +1,300 @@
+{
+  "slug": "cher-horowitz",
+  "name": "Cher Horowitz",
+  "work": {
+    "title": "Clueless",
+    "kind": "film",
+    "year": 1995
+  },
+  "manner": "Answers with total confidence and a fashion comparison, dismisses the premise with an as-if, and slips a sharper point in underneath.",
+  "words_source": "transcript",
+  "likes": [
+    {
+      "name": "Jeep",
+      "type": "brand",
+      "why": "She drives the white Jeep her father bought her, without a licence, and runs over a potted plant on the first trip."
+    },
+    {
+      "name": "Calvin Klein",
+      "type": "brand",
+      "why": "When her father asks what she is wearing, she says a dress, and says who: Calvin Klein."
+    },
+    {
+      "name": "Alaïa",
+      "type": "brand",
+      "why": "Held up at gunpoint, she refuses to lie down on the ground in her red dress because it is an Alaïa, a totally important designer."
+    },
+    {
+      "name": "Hamlet",
+      "type": "movie",
+      "why": "She corrects Josh's girlfriend on who said to thine own self be true, because she remembers Mel Gibson's Hamlet accurately."
+    },
+    {
+      "name": "Ren & Stimpy",
+      "type": "tv_show",
+      "why": "She tells Christian she was watching it and finds it so way existential."
+    },
+    {
+      "name": "Billie Holiday",
+      "type": "artist",
+      "why": "When Christian asks about Billie Holiday she says she loves him."
+    },
+    {
+      "name": "Beverly Hills",
+      "type": "place",
+      "why": "Home, school and the mall are all there, and she describes her house's classic columns."
+    },
+    {
+      "name": "Fit or Fat",
+      "type": "book",
+      "why": "It is one of the self-help books she gives Tai during the makeover."
+    },
+    {
+      "name": "Marky Mark",
+      "type": "person",
+      "why": "She wants to donate her time the way he does, to plant a celebrity tree."
+    }
+  ],
+  "words": [
+    {
+      "word": "semester",
+      "where": {
+        "scene": "Classroom debate"
+      }
+    },
+    {
+      "word": "bonehead",
+      "where": {
+        "scene": "School P.E. class"
+      }
+    },
+    {
+      "word": "ballistic",
+      "where": {
+        "scene": "School hallway"
+      }
+    },
+    {
+      "word": "clueless",
+      "where": {
+        "scene": "School P.E. class"
+      }
+    },
+    {
+      "word": "brutally",
+      "where": {
+        "scene": "The mall"
+      }
+    },
+    {
+      "word": "vitamin",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "outfits",
+      "where": {
+        "scene": "Cher's car"
+      }
+    },
+    {
+      "word": "freeway",
+      "where": {
+        "scene": "Murray's car"
+      }
+    },
+    {
+      "word": "bouquet",
+      "where": {
+        "scene": "The wedding"
+      }
+    },
+    {
+      "word": "licence",
+      "where": {
+        "scene": "Cher's car"
+      }
+    },
+    {
+      "word": "lounge",
+      "where": {
+        "scene": "Make-over at cher's"
+      }
+    },
+    {
+      "word": "deeds",
+      "where": {
+        "scene": "School P.E. class"
+      }
+    },
+    {
+      "word": "infomercials",
+      "where": {
+        "scene": "Cher's car"
+      }
+    },
+    {
+      "word": "redistribute",
+      "where": {
+        "scene": "Classroom debate"
+      }
+    },
+    {
+      "word": "fiftieth",
+      "where": {
+        "scene": "Classroom debate"
+      }
+    },
+    {
+      "word": "rebuffed",
+      "where": {
+        "scene": "The mall"
+      }
+    },
+    {
+      "word": "sublimely",
+      "where": {
+        "scene": "The mall"
+      }
+    },
+    {
+      "word": "tardies",
+      "where": {
+        "scene": "School"
+      }
+    },
+    {
+      "word": "aerobically",
+      "where": {
+        "scene": "School P.E. class"
+      }
+    },
+    {
+      "word": "adorably",
+      "where": {
+        "scene": "School P.E. class"
+      }
+    },
+    {
+      "word": "sporadically",
+      "where": {
+        "scene": "Make-over at cher's"
+      }
+    },
+    {
+      "word": "tendrils",
+      "where": {
+        "scene": "Elton's car"
+      }
+    },
+    {
+      "word": "unequivocal",
+      "where": {
+        "scene": "School"
+      }
+    },
+    {
+      "word": "scholastic",
+      "where": {
+        "scene": "The mall"
+      }
+    },
+    {
+      "word": "litigator",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "gazillion",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "maudlin",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "dumbfounded",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "slobber",
+      "where": {
+        "scene": "School walkway"
+      }
+    },
+    {
+      "word": "airbags",
+      "where": {
+        "scene": "Cher's car"
+      }
+    },
+    {
+      "word": "sporadic",
+      "where": {
+        "scene": "Make-over at cher's"
+      }
+    },
+    {
+      "word": "devoting",
+      "where": {
+        "scene": "Make-over at cher's"
+      }
+    },
+    {
+      "word": "polaroids",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "astonishment",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "thankless",
+      "where": {
+        "scene": "School"
+      }
+    },
+    {
+      "word": "cameo",
+      "where": {
+        "scene": "Cher's house,"
+      }
+    },
+    {
+      "word": "depositions",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "granola",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "replenish",
+      "where": {
+        "scene": "Cher's house"
+      }
+    },
+    {
+      "word": "existential",
+      "where": {
+        "scene": "Cher's house"
+      }
+    }
+  ]
+}

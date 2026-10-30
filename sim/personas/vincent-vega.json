@@ -1,0 +1,290 @@
+{
+  "slug": "vincent-vega",
+  "name": "Vincent Vega",
+  "work": {
+    "title": "Pulp Fiction",
+    "kind": "film",
+    "year": 1994
+  },
+  "manner": "Answers slowly and literally, circles the question the way he circles a cheeseburger, and treats small facts about everyday things as worth a real discussion.",
+  "words_source": "transcript",
+  "likes": [
+    {
+      "name": "McDonald's",
+      "type": "brand",
+      "why": "He explains to Jules that in Paris a Quarter Pounder with Cheese is called a Royale with Cheese."
+    },
+    {
+      "name": "Amsterdam",
+      "type": "place",
+      "why": "He has just spent three years there and describes the hash bars and the beer in a glass at the movies."
+    },
+    {
+      "name": "Jack Rabbit Slim's",
+      "type": "place",
+      "why": "He takes Mia to dinner there and wins the twist contest with her."
+    },
+    {
+      "name": "Chevrolet",
+      "type": "brand",
+      "why": "His 1964 Chevelle Malibu convertible was keyed while he was away and he says the man who did it should be killed."
+    },
+    {
+      "name": "Coca-Cola",
+      "type": "brand",
+      "why": "He orders a vanilla Coke at Jack Rabbit Slim's while Mia orders the five-dollar shake."
+    },
+    {
+      "name": "Modesty Blaise",
+      "type": "book",
+      "why": "He reads the paperback in the bathroom at Butch's apartment."
+    },
+    {
+      "name": "Chuck Berry",
+      "type": "artist",
+      "why": "He twists with Mia to You Never Can Tell in the dance contest."
+    }
+  ],
+  "words": [
+    {
+      "word": "royale",
+      "where": {
+        "scene": "'74 chevy (moving), morning"
+      }
+    },
+    {
+      "word": "marker",
+      "where": {
+        "scene": "Spare room"
+      }
+    },
+    {
+      "word": "ballpark",
+      "where": {
+        "scene": "Apartment building hallway, morning"
+      }
+    },
+    {
+      "word": "threshold",
+      "where": {
+        "scene": "Garage, morning"
+      }
+    },
+    {
+      "word": "witnessed",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "hallway",
+      "where": {
+        "scene": "Nova (moving), morning"
+      }
+    },
+    {
+      "word": "palooka",
+      "where": {
+        "scene": "Sally leroy's, day"
+      }
+    },
+    {
+      "word": "rationale",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "nimrod",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "theological",
+      "where": {
+        "scene": "Apartment, day"
+      }
+    },
+    {
+      "word": "punchy",
+      "where": {
+        "scene": "Sally leroy's, day"
+      }
+    },
+    {
+      "word": "cowgirl",
+      "where": {
+        "scene": "Jackrabbit slim's, night"
+      }
+    },
+    {
+      "word": "jailhouse",
+      "where": {
+        "scene": "Apartment, day"
+      }
+    },
+    {
+      "word": "metric",
+      "where": {
+        "scene": "'74 chevy (moving), morning"
+      }
+    },
+    {
+      "word": "splatter",
+      "where": {
+        "scene": "Nova (moving), morning"
+      }
+    },
+    {
+      "word": "proprietor",
+      "where": {
+        "scene": "'74 chevy (moving), morning"
+      }
+    },
+    {
+      "word": "qualifies",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "occurrence",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "petrified",
+      "where": {
+        "scene": "Front of marsellus wallace's house, night"
+      }
+    },
+    {
+      "word": "sensual",
+      "where": {
+        "scene": "Apartment building hallway, morning"
+      }
+    },
+    {
+      "word": "mayonnaise",
+      "where": {
+        "scene": "'74 chevy (moving), morning"
+      }
+    },
+    {
+      "word": "admits",
+      "where": {
+        "scene": "Garage, morning"
+      }
+    },
+    {
+      "word": "abusive",
+      "where": {
+        "scene": "Jimmie's bathroom, day"
+      }
+    },
+    {
+      "word": "designated",
+      "where": {
+        "scene": "'74 chevy (moving), morning"
+      }
+    },
+    {
+      "word": "meaningful",
+      "where": {
+        "scene": "Bathroom (marsellus wallace's house), night"
+      }
+    },
+    {
+      "word": "excessive",
+      "where": {
+        "scene": "Jackrabbit slim's (dining area), night"
+      }
+    },
+    {
+      "word": "adrenaline",
+      "where": {
+        "scene": "Lance's house, night"
+      }
+    },
+    {
+      "word": "ketchup",
+      "where": {
+        "scene": "'74 chevy (moving), morning"
+      }
+    },
+    {
+      "word": "bourbon",
+      "where": {
+        "scene": "Jackrabbit slim's, night"
+      }
+    },
+    {
+      "word": "lighten",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "vanilla",
+      "where": {
+        "scene": "Jackrabbit slim's, night"
+      }
+    },
+    {
+      "word": "disrespect",
+      "where": {
+        "scene": "Kitchen, morning"
+      }
+    },
+    {
+      "word": "specialty",
+      "where": {
+        "scene": "Jackrabbit slim's, night"
+      }
+    },
+    {
+      "word": "peculiar",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "tobacco",
+      "where": {
+        "scene": "Jackrabbit slim's, night"
+      }
+    },
+    {
+      "word": "cease",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "philosophy",
+      "where": {
+        "scene": "Garage, morning"
+      }
+    },
+    {
+      "word": "residence",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "principle",
+      "where": {
+        "scene": "Coffee shop, morning"
+      }
+    },
+    {
+      "word": "keyed",
+      "where": {
+        "scene": "Lance's bedroom, night"
+      }
+    }
+  ]
+}

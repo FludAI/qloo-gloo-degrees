@@ -1,0 +1,370 @@
+{
+  "slug": "gregory-house",
+  "name": "Gregory House",
+  "work": {
+    "title": "House",
+    "kind": "tv",
+    "year": 2004
+  },
+  "manner": "Answers a question with a sharper question, assumes the asker is lying, and gives the real answer only once he has turned it into a puzzle.",
+  "words_source": "transcript",
+  "likes": [
+    {
+      "name": "The Rolling Stones",
+      "type": "artist",
+      "why": "In the pilot he tells Cuddy that, as the philosopher Jagger once said, you can't always get what you want."
+    },
+    {
+      "name": "General Hospital",
+      "type": "tv_show",
+      "why": "He watches his soap on the clinic's and patients' televisions when he should be working."
+    },
+    {
+      "name": "Gibson",
+      "type": "brand",
+      "why": "The Flying V in his apartment is the guitar he picks up when he is thinking."
+    },
+    {
+      "name": "Honda",
+      "type": "brand",
+      "why": "He rides an orange Repsol CBR1000RR motorcycle to the hospital."
+    },
+    {
+      "name": "Chevrolet",
+      "type": "brand",
+      "why": "He drives a red 1965 Corvette and drives it into Cuddy's dining room."
+    },
+    {
+      "name": "Vicodin",
+      "type": "brand",
+      "why": "He takes it on screen in almost every episode and fights to keep taking it."
+    },
+    {
+      "name": "Steve McQueen",
+      "type": "person",
+      "why": "He names the rat he catches in Stacy's attic Steve McQueen and keeps it."
+    }
+  ],
+  "words": [
+    {
+      "word": "clot",
+      "where": {
+        "season": 8,
+        "episode": 14,
+        "scene": "radiology"
+      }
+    },
+    {
+      "word": "diagnosis",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "Diagnostics"
+      }
+    },
+    {
+      "word": "steroids",
+      "where": {
+        "season": 8,
+        "episode": 17,
+        "scene": "the diagnostics room, the team is sitting while Chase is making coffee for himself"
+      }
+    },
+    {
+      "word": "dose",
+      "where": {
+        "season": 8,
+        "episode": 19,
+        "scene": "Wilson sitting behind his desk at PPTH with his feet propped up"
+      }
+    },
+    {
+      "word": "symmetrical",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "Oliver’s room"
+      }
+    },
+    {
+      "word": "ultrasound",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "Diagnostics"
+      }
+    },
+    {
+      "word": "chemo",
+      "where": {
+        "season": 8,
+        "episode": 21,
+        "scene": "Wilson continues to stand in the open doorway"
+      }
+    },
+    {
+      "word": "lice",
+      "where": {
+        "season": 8,
+        "episode": 15,
+        "scene": "Foreman leaves"
+      }
+    },
+    {
+      "word": "fluids",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "House’s bedroom"
+      }
+    },
+    {
+      "word": "antibiotics",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "House sits and opens the box closest to him"
+      }
+    },
+    {
+      "word": "syndrome",
+      "where": {
+        "season": 8,
+        "episode": 20,
+        "scene": "Diagnostics room"
+      }
+    },
+    {
+      "word": "honorable",
+      "where": {
+        "season": 8,
+        "episode": 15,
+        "scene": "Foreman leaves"
+      }
+    },
+    {
+      "word": "naloxone",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "House fills a syringe that was in the unlocked cart with a drug that was there as well"
+      }
+    },
+    {
+      "word": "encephalopathy",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "He slaps Taub on the back of the head"
+      }
+    },
+    {
+      "word": "plasmapheresis",
+      "where": {
+        "season": 8,
+        "episode": 17,
+        "scene": "On the other side of the line, the team is in the diagnostics room, sitting at the…"
+      }
+    },
+    {
+      "word": "excrete",
+      "where": {
+        "season": 8,
+        "episode": 16,
+        "scene": "Chase and Taub in the hall"
+      }
+    },
+    {
+      "word": "anopheles",
+      "where": {
+        "season": 8,
+        "episode": 15,
+        "scene": "They all look at House to see how he will respond"
+      }
+    },
+    {
+      "word": "perjure",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "Foreman takes the oxygen mask and puts it on Oliver’s face"
+      }
+    },
+    {
+      "word": "thrombosis",
+      "where": {
+        "season": 8,
+        "episode": 15,
+        "scene": "House working his way through the cafeteria line"
+      }
+    },
+    {
+      "word": "rationalize",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "House is in a chair next to Oliver’s bed"
+      }
+    },
+    {
+      "word": "hallucinate",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "a long shot of the room"
+      }
+    },
+    {
+      "word": "objectivity",
+      "where": {
+        "season": 8,
+        "episode": 16,
+        "scene": "They all watch"
+      }
+    },
+    {
+      "word": "spasms",
+      "where": {
+        "season": 8,
+        "episode": 19,
+        "scene": "Wilson picks up his drink and holds it toward House to complete the toast"
+      }
+    },
+    {
+      "word": "typhus",
+      "where": {
+        "season": 8,
+        "episode": 15,
+        "scene": "Brant’s hospital room"
+      }
+    },
+    {
+      "word": "inhaled",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "OR where Taub is operating on Oliver"
+      }
+    },
+    {
+      "word": "nocturnal",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "Diagnostics"
+      }
+    },
+    {
+      "word": "dizziness",
+      "where": {
+        "season": 8,
+        "episode": 21,
+        "scene": "House pulls back on the plunger, then holds up the syringe, which is full of blood"
+      }
+    },
+    {
+      "word": "cowardice",
+      "where": {
+        "season": 8,
+        "episode": 20,
+        "scene": "a bar"
+      }
+    },
+    {
+      "word": "toxins",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "House sits and opens the box closest to him"
+      }
+    },
+    {
+      "word": "diabetic",
+      "where": {
+        "season": 8,
+        "episode": 14,
+        "scene": "a black and white photograph of someone with the eyes cut out"
+      }
+    },
+    {
+      "word": "biopsy",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "He slaps Taub on the back of the head"
+      }
+    },
+    {
+      "word": "painkillers",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "Oliver decides not to continue playing “state random, useless information about yourself.”"
+      }
+    },
+    {
+      "word": "allergy",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "He turns back"
+      }
+    },
+    {
+      "word": "gibberish",
+      "where": {
+        "season": 8,
+        "episode": 18,
+        "scene": "House’s office"
+      }
+    },
+    {
+      "word": "bacteria",
+      "where": {
+        "season": 8,
+        "episode": 17,
+        "scene": "the diagnostics room, the team is sitting at the table; House is standing by the…"
+      }
+    },
+    {
+      "word": "psychology",
+      "where": {
+        "season": 8,
+        "episode": 17,
+        "scene": "the diagnostics room, the team is sitting while Chase is making coffee for himself"
+      }
+    },
+    {
+      "word": "tumor",
+      "where": {
+        "season": 8,
+        "episode": 20,
+        "scene": "Foreman drops the files on the table and leaves the room"
+      }
+    },
+    {
+      "word": "scenario",
+      "where": {
+        "season": 8,
+        "episode": 19,
+        "scene": "a short time into the future"
+      }
+    },
+    {
+      "word": "pancreatitis",
+      "where": {
+        "season": 8,
+        "episode": 22,
+        "scene": "Diagnostics"
+      }
+    },
+    {
+      "word": "granuloma",
+      "where": {
+        "season": 8,
+        "episode": 21,
+        "scene": "House stops for a moment, considering what Adams has just said"
+      }
+    }
+  ]
+}

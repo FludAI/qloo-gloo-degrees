@@ -79,6 +79,9 @@ if (!db.prepare("PRAGMA table_info(first_attempts)").all().some((c) => c.name ==
     if (!cols.includes(col)) db.exec(`ALTER TABLE learners ADD COLUMN ${col} ${type}`);
   }
   if (!db.prepare("PRAGMA table_info(pick_offers)").all().some((c) => c.name === "build_ms")) db.exec("ALTER TABLE pick_offers ADD COLUMN build_ms REAL");
+  // A drafted word whose cards were built from Qloo (cards.mjs) keeps a small record per card: candidates, names the
+  // sound bar dropped, kept, fallback, the judge's scores; the degrees report reads it.
+  if (!db.prepare("PRAGMA table_info(provisional_terms)").all().some((c) => c.name === "cards")) db.exec("ALTER TABLE provisional_terms ADD COLUMN cards TEXT");
   // Model calls (providers.mjs): which model answered, what it cost in tokens, and whether the arm asked for fell back.
   const calls = db.prepare("PRAGMA table_info(provider_calls)").all().map((c) => c.name);
   for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"], ["stop", "TEXT"], ["note", "TEXT"], ["brief", "INTEGER"]]) {
@@ -104,7 +107,7 @@ export const q = {
   provisionalAnyById: db.prepare("SELECT * FROM provisional_terms WHERE id = ?"), // owner promotion only; never a learner route
 
   provisionalFor: db.prepare("SELECT id, word, origin, packet FROM provisional_terms WHERE sid = ? ORDER BY created_at"),
-  addProvisional: db.prepare("INSERT INTO provisional_terms (id, sid, word, origin, packet, created_at) VALUES (?, ?, ?, ?, ?, ?)"),
+  addProvisional: db.prepare("INSERT INTO provisional_terms (id, sid, word, origin, packet, created_at, cards) VALUES (?, ?, ?, ?, ?, ?, ?)"),
   logResolution: db.prepare(`INSERT INTO resolutions (sid, mode, input, resolved, term_id, method, score, decision, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   attemptsFor: db.prepare("SELECT * FROM attempts WHERE sid = ? AND term_id = ? ORDER BY created_at, id"),

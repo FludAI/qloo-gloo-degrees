@@ -34,7 +34,7 @@ import { record as recordNode, learnerGraph } from "./graph.mjs";
 import * as credits from "./credits.mjs";
 import { levelFor, forceLevel, levelInfo, parseLevel, armFor, forceArm, parseArm } from "./level.mjs";
 import { availability as modelAvailability, MODELS } from "./providers.mjs";
-import { qlooCards, CANDIDATES } from "./cards.mjs";
+import { qlooCards, cardsRecord, CANDIDATES } from "./cards.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -446,8 +446,8 @@ app.post("/api/glue", wrap(async (req, res) => {
     } else {
       packet = syntheticLesson(id, best.word);
     }
-    if (built) packet = await qlooCards(packet, (op, args) => runQloo(req.sid, op, args));
-    q.addProvisional.run(id, req.sid, best.word, packet.origin, JSON.stringify(packet), Date.now());
+    if (built) packet = await qlooCards(packet, (op, args) => runQloo(req.sid, op, args), { sid: req.sid });
+    q.addProvisional.run(id, req.sid, best.word, packet.origin, JSON.stringify(packet), Date.now(), built ? JSON.stringify(cardsRecord(packet)) : null);
     termId = id;
     created = true;
     refreshBrief(req.sid);

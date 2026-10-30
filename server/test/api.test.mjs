@@ -538,9 +538,10 @@ test("degree 2: a new word's pick cards are built from Qloo: more candidates ask
   assert.equal(body.created, true);
   await s("POST", `/api/terms/${body.term_id}/first-attempt`, { skipped: true });
   const term = (await s("GET", `/api/terms/${body.term_id}`)).body;
-  assert.deepEqual(term.cards, { source: "qloo", describes: 9, skipped: 0, unasked: 0, cap: 40, floor: 0.3 });
+  assert.deepEqual(term.cards, { source: "qloo", describes: 9, skipped: 0, unasked: 0, cap: 40, floor: 0.3, bar: 0.75, dropped: 0, fallbacks: 0, judge: "off", judged: 0, judge_zero: 0, judge_failed: 0 });
   const role = term.roles.find((r) => r.id === "peri");
-  assert.equal(role.pick.built.source, "qloo"); assert.equal(role.pick.built.candidates, 9);
+  assert.equal(role.pick.built.source, "qloo"); assert.equal(role.pick.built.candidates, 9); assert.equal(role.pick.built.cleared, 9); assert.deepEqual(role.pick.built.dropped, []); assert.equal(role.pick.built.fallback, null);
+  assert.ok(role.pick.options.every((o) => o.sound === 1), "every fake candidate carries peri or perry whole");
   const kept = role.pick.options.filter((o) => o.qloo?.entity_id);
   assert.ok(kept.length >= 4 && kept.length <= 8, `${kept.length} resolved`);
   assert.ok(role.pick.options.length <= 8 && role.pick.options.length >= 4);
@@ -666,8 +667,13 @@ test("model arm: ?model=muse sends the camera read, the drafter, the hearing fix
   assert.equal(typeof muse.median_ms.read_word, "number"); assert.equal(muse.rates.read_ok, 1);
   assert.ok(anth.sessions >= 1 && anth.reads_ok >= 1);
   assert.ok(r.cells.some((c) => c.level === 3 && c.arm === "muse" && c.sessions >= 1));
+  // The built cards of the degree-2 session above: one card, nine candidates, none dropped, no judge.
+  const two = r.cells.find((c) => c.level === 2 && c.arm === "anthropic");
+  assert.deepEqual(two.built, { cards: 1, median_kept: 8, dropped_rate: 0, fallbacks: 0, judged_names: 0, median_judged: null, judge_zero_rate: null, judge_failed: 0 });
+  assert.deepEqual(r.levels.find((l) => l.level === 1).built.cards, 0);
   const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
   assert.match(text, /by model arm\n/); assert.match(text, /\nmuse +\d/); assert.match(text, /by degree and arm/);
+  assert.match(text, /built cards\nlevel +arm +built +kept +dropped +fallbacks +judged \(names\) +judge-0 +judge-failed\n[- ]+\n2 +anthropic +1 +8 +0% +0 +- +- +0 *\n/);
   const t = await (await fetch(`http://localhost:${PORT}/api/admin/testers?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
   assert.ok(t.rows.some((row) => row.reads.ok >= 1 && row.level === 3));
   const h = (await s("GET", "/api/health")).body;

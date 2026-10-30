@@ -7,9 +7,8 @@
   "likes": [
     { "name": "JJ's Diner", "type": "place", "why": "She eats whipped-cream waffles there and calls them the best thing in Pawnee." },
     { "name": "Pawnee Commons", "type": "place", "why": "She spends years turning the pit on Lot 48 into the park that opens as Pawnee Commons." },
-    { "name": "Joe Biden", "type": "person", "why": "He is her stated celebrity crush, and Ben arranges for her to meet him in season five." },
-    { "name": "Hillary Clinton", "type": "person", "why": "Her framed photo hangs on Leslie's office wall among the women in politics she admires." },
-    { "name": "Madeleine Albright", "type": "person", "why": "Her photo is on the office wall and Leslie has brunch with her in the final season." },
+    { "name": "Washington, D.C.", "type": "place", "why": "She tours it starstruck in season five and calls it the most beautiful city in the world." },
+    { "name": "Pawnee", "type": "place", "why": "The town she loves above all others; she wrote the book Pawnee: The Greatest Town in America about it." },
     { "name": "Ann Perkins", "type": "person", "why": "She greets her best friend with compliments like beautiful tropical fish in almost every episode." },
     { "name": "Ben Wyatt", "type": "person", "why": "She marries him in a wedding thrown together in the parks department office." }
   ],

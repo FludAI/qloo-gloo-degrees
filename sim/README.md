@@ -57,6 +57,8 @@ sim/
 wearing, eating, quoting, driving or returning to on screen. Nothing
 comes from a recommendation service and nothing comes from the life of
 the performer. The `why` field carries the evidence and is required.
+Likes name no real living person: a `person` like is a character of the
+work, never the public figures the character admires on screen.
 
 **Words, not lines.** Transcripts are read only to extract vocabulary.
 The repository stores single words and where they were said; it never

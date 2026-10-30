@@ -143,6 +143,8 @@ const create = (p, body) => (p === "muse" ? museCreate(body) : (anthropic ??= ne
 // call was read out of the text, "no_tool" when tools were offered and none came back, else null. Both go on the row,
 // with `brief`: how many characters of the learner brief the prompt carried (0 for none; brief.mjs), and the note
 // says "brief_dropped" when the guard kept one out of this call.
+// `row` is the id of the provider_calls row the call was logged on (null when `log` is off), so a caller that
+// judges the answer afterwards can add to its note (q.noteCall).
 // Throws on a provider error after logging it; throws MODEL_UNAVAILABLE when no backend has a key.
 export async function complete({ provider = "anthropic", task = "model", sid = null, log = true, brief_chars = 0, brief_dropped = false, ...body }) {
   const use = pick(provider);
@@ -156,8 +158,8 @@ export async function complete({ provider = "anthropic", task = "model", sid = n
     const stop = res.stop_reason ?? null;
     const base = res.note ?? (body.tools?.length && !(res.content ?? []).some((b) => b.type === "tool_use") ? "no_tool" : null);
     const note = brief_dropped ? [base, "brief_dropped"].filter(Boolean).join(",") : base;
-    if (log) q.logModel.run(sid, use.provider, task, "ok", null, ms, Date.now(), model, usage.input, usage.output, use.fallback_from, stop, note, brief_chars);
-    return { res, provider: use.provider, model, fallback_from: use.fallback_from, usage, ms, stop, note, brief_chars };
+    const row = log ? Number(q.logModel.run(sid, use.provider, task, "ok", null, ms, Date.now(), model, usage.input, usage.output, use.fallback_from, stop, note, brief_chars).lastInsertRowid) : null;
+    return { res, provider: use.provider, model, fallback_from: use.fallback_from, usage, ms, stop, note, brief_chars, row };
   } catch (e) {
     if (log) q.logModel.run(sid, use.provider, task, "error", null, performance.now() - t0, Date.now(), model, null, null, use.fallback_from, null, brief_dropped ? "brief_dropped" : null, brief_chars);
     e.provider = use.provider;

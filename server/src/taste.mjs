@@ -125,7 +125,7 @@ export async function tailorRole(role, signals, call, { budget = remaining, grou
   const options = role.pick?.options ?? [];
   const editorial = (reason) => ({ ...role, pick: { ...role.pick, options: options.map((o) => ({ ...o })), tailoring: { source: "editorial", reason } } });
   if (level != null && level < 1) return editorial("level 0");
-  if (signals.length < MIN_PICKS) return editorial("fewer than two picks");
+  if (signals.length < MIN_PICKS) return editorial(MIN_PICKS === 2 ? "fewer than two picks" : MIN_PICKS === 1 ? "no pick yet" : `fewer than ${MIN_PICKS} picks`);
   if (options.length < 2) return editorial("one option");
   await loadEntities();
 

@@ -129,6 +129,8 @@ export const q = {
   logCall: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
   logModel: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at, model, tokens_in, tokens_out, fallback_from, stop, note, brief) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   callCounts: db.prepare("SELECT provider, status, COUNT(*) AS n FROM provider_calls WHERE sid = ? GROUP BY provider, status"),
+  // Add a word to a model row's note after the fact (the drafter marks a draft that came back without cards).
+  noteCall: db.prepare("UPDATE provider_calls SET note = CASE WHEN note IS NULL OR note = '' THEN ?1 ELSE note || ',' || ?1 END WHERE id = ?2"),
 };
 
 export function exportLearner(sid) {

@@ -38,7 +38,7 @@ bucket, and `MEDIA_PREFIX=degrees/` keeps every object it writes apart from prod
 gcloud run deploy qloo-gloo-degrees --source . --region $REGION \
   --allow-unauthenticated \
   --set-secrets QLOO_API_KEY=qloo-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_TOKEN=gloo-admin-token:latest,META_API_KEY=meta-api-key:latest \
-  --update-env-vars CREDITS_WELCOME=20,PUBLIC_URL=https://qloo.gloo.news,MEDIA_PREFIX=degrees/ \
+  --update-env-vars CREDITS_WELCOME=20,PUBLIC_URL=https://qloo.gloo.news,MEDIA_PREFIX=degrees/,TASTE_MIN_PICKS=1 \
   --min-instances 1 --max-instances 1 --session-affinity \
   --memory 1Gi --cpu 1 --timeout 120
 ```
@@ -175,6 +175,8 @@ Environment variables (defaults shown):
 | `CREDITS_SAME_IP_MINUTES` | `60` | A claim from the referrer's own address within this window is held, not paid |
 | `CREDITS_SECRET` | `ADMIN_TOKEN` | Keys referral codes and the address hash; set it if the owner token ever rotates |
 | `PUBLIC_URL` | request origin | Base of the referral link (`https://gloo.news`) |
+| `TASTE_MIN_PICKS` | `2` | Picks a session needs before its pick cards are ranked for it; production and the degrees service run with `1`, so the cards still ahead in a first lesson are ranked after the first pick (a card already picked keeps its order) |
+| `DRAFT_MAX_TOKENS` / `DRAFT_MAX_TOKENS_WIDE` | `2500` / `6000` | Output cap of a lesson draft, and of a wide draft (degree 2 asks for eight to twelve candidates per piece). A draft cut at its cap, or one without a pick card, is marked on its row (`no_cards`), drafted once more at four options (`cards_fallback`), and never shipped without a card; the degrees report counts them (`cut/text/no-cards`) |
 | `MEDIA_PREFIX` | unset | Put in front of every media key (`degrees/`), so two deployments share one bucket without touching each other's clips, art, lessons or Qloo caches |
 | `QLOO_LEVELS` | `0,1,2,3` | The degrees of Qloo a new session may draw (0 editorial, 1 rerank, 2 Qloo cards, 3 agent doorway); `?qloo=N` on any URL forces one for that session; `GET /api/level` reads it; `GET /api/admin/degrees?hours=&format=text` splits outcomes by degree |
 | `QLOO_POP_FLOOR` | `0.3` | Degree 2: a drafted pick candidate below this Qloo popularity is dropped |

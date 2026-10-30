@@ -20,6 +20,7 @@ let fake, proc, calls = 0, ttsCalls = 0, reviewInstruction = null;
 // Fake Anthropic Messages API: one Qloo describe call, then a proposal with one real and one invented ID.
 let replyModel = "fake";
 let museStyle = "tool";
+let draftStyle = "ok"; // "cut": a wide (8-12 option) draft comes back cut at the cap with a fragment of the lesson in the tool call, as the live API returned it; the four-option retry is answered whole
 let lastDraft = null, lastAgent = null; // the last draft_lesson request and the last agent run's opening request, as the model saw them // how the fake Muse answers: "tool" (tool_calls), "text" (the call as fenced JSON in content parts), "cut" (finish_reason length, mid-thought)
 const reply = (content) => ({ id: "msg", type: "message", role: "assistant", model: replyModel, stop_reason: "tool_use", content, usage: { input_tokens: replyModel === "fake-muse" ? 7 : 10, output_tokens: replyModel === "fake-muse" ? 3 : 10 } });
 before(async () => {
@@ -104,9 +105,12 @@ before(async () => {
         const many = String(parsed.system).includes("8 to 12");
         const tool = (parsed.tools ?? []).find((t) => t.name === "draft_lesson");
         assert.equal(tool.input_schema.properties.roles.items.properties.pick.properties.options.maxItems, many ? 12 : 4);
+        assert.equal(muse ? parsed.max_completion_tokens - 6000 : parsed.max_tokens, many ? 6000 : 2500, "a wide draft gets a wider cap (the muse cap carries its reasoning headroom on top)");
+        if (draftStyle === "cut" && many) return res.end(JSON.stringify({ ...reply([{ type: "tool_use", id: "d0", name: "draft_lesson", input: { title: "Peristalsis", summary: "peri (around) + stal" } }]), stop_reason: "max_tokens", usage: { input_tokens: 10, output_tokens: 6000 } }));
         const peri = many ? { pick: { question: "Say your favorite peri.", options: [
           ["Peri-Peri Sauce", "brand"], ["Perrier", "brand"], ["Obscure Peri Band", "artist"], ["Periscope", "brand"], ["Perry Mason", "tv_show"], ["Katy Perry", "artist"], ["Peridot", "brand"], ["Perrier-Jouet", "brand"], ["Peri", "movie"],
-        ].map(([name, type]) => ({ name, wiki: name, type, connection: `${name} starts with the sound of peri (approximate).` })) } } : {};
+        ].map(([name, type]) => ({ name, wiki: name, type, connection: `${name} starts with the sound of peri (approximate).` })) } }
+          : { pick: { question: "Say your favorite peri.", options: [["Perrier", "brand"], ["Katy Perry", "artist"], ["Perry Mason", "tv_show"], ["Periscope", "brand"]].map(([name, type]) => ({ name, wiki: name, type, connection: `${name} starts with the sound of peri (approximate).` })) } };
         return res.end(JSON.stringify(reply([{ type: "tool_use", id: "d1", name: "draft_lesson", input: {
           title: "Peristalsis", pronunciation_approx: "pair-ih-STAL-sis", summary: "peri (around) + stalsis (contraction)",
           definition: "Wave-like muscle contractions that move food through the digestive tract.",
@@ -554,15 +558,41 @@ test("degree 2: a new word's pick cards are built from Qloo: more candidates ask
   assert.deepEqual(calls, [{ provider: "qloo-mock", status: "empty", n: 1 }, { provider: "qloo-mock", status: "ok", n: 8 }]);
   await s("GET", `/api/terms/${body.term_id}`);
   assert.equal((await s("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider === "qloo-mock").reduce((n, c) => n + c.n, 0), 9);
-  // A degree-1 session drafting the same word gets four untyped options and no describe.
+  // A degree-1 session drafting the same word gets the drafter's four options as they came and no describe.
   const s1 = session();
   assert.equal((await s1("GET", "/api/level?qloo=1")).body.level, 1);
   const one = (await s1("POST", "/api/glue", { text: "peristalsis", mode: "typed" })).body;
   await s1("POST", `/api/terms/${one.term_id}/first-attempt`, { skipped: true });
   const t1 = (await s1("GET", `/api/terms/${one.term_id}`)).body;
   assert.equal(t1.cards, undefined);
-  assert.equal(t1.roles.find((r) => r.id === "peri").pick, undefined);
+  const p1 = t1.roles.find((r) => r.id === "peri").pick;
+  assert.equal(p1.options.length, 4); assert.equal(p1.built, undefined); assert.ok(p1.options.every((o) => !o.qloo?.entity_id));
   assert.equal((await s1("GET", "/api/diagnostics")).body.calls.filter((c) => c.provider === "qloo-mock").length, 0);
+});
+
+test("a wide draft cut at the cap never ships without cards: the row says so, the word is drafted again at four options, and the report counts it", async () => {
+  draftStyle = "cut";
+  try {
+    const s = session();
+    assert.equal((await s("GET", "/api/level?qloo=2")).body.level, 2);
+    const { status, body } = await s("POST", "/api/glue", { text: "peristalsis", mode: "typed" });
+    assert.equal(status, 200, JSON.stringify(body)); assert.equal(body.created, true);
+    await s("POST", `/api/terms/${body.term_id}/first-attempt`, { skipped: true });
+    const term = (await s("GET", `/api/terms/${body.term_id}`)).body;
+    const peri = term.roles.find((r) => r.id === "peri");
+    assert.ok(peri.pick.options.length >= 3, "the lesson has its card");
+    assert.deepEqual(term.draft, { candidates: 4, asked: 12, fallback: "cards" });
+    assert.equal(term.cards.source, "qloo", "the four names still go through Qloo at degree 2");
+    // Two draft rows: the cut one marked, the retry marked as the fallback; the report counts the cut draft once.
+    const rows = (await s("GET", "/api/export")).body.provider_calls.filter((c) => c.op === "draft_lesson");
+    assert.deepEqual(rows.map((c) => [c.status, c.stop, c.note, c.tokens_out]), [["ok", "max_tokens", "cut,no_cards", 6000], ["ok", "tool_use", "cards_fallback", 10]]);
+    const r = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
+    const two = r.cells.find((c) => c.level === 2 && c.arm === "anthropic");
+    assert.ok(two.no_cards >= 1 && two.model_cut >= 1, JSON.stringify([two.no_cards, two.model_cut]));
+    assert.equal(two.drafted_briefed + two.drafted_plain, two.drafted_words, "the cut row is left out of the brief pairing");
+    const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
+    assert.match(text, /cut\/text\/no-cards/);
+  } finally { draftStyle = "ok"; }
 });
 
 test("degree 3: the doorway fills familiar from the learner's picks, focuses the card's piece, and a proposed card picked becomes an agent hook with its verified ID", async () => {

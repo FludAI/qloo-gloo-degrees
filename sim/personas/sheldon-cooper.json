@@ -1,0 +1,385 @@
+{
+  "slug": "sheldon-cooper",
+  "name": "Sheldon Cooper",
+  "work": {
+    "title": "The Big Bang Theory",
+    "kind": "tv",
+    "year": 2007
+  },
+  "manner": "Answers with the exact fact, corrects the premise of the question, misses that it may have been rhetorical, and waits to be thanked.",
+  "words_source": "transcript",
+  "likes": [
+    {
+      "name": "Star Trek",
+      "type": "tv_show",
+      "why": "He owns the uniform, models himself on Spock and keeps a Leonard Nimoy napkin as a treasure."
+    },
+    {
+      "name": "Halo",
+      "type": "video_game",
+      "why": "Wednesday is Halo night and he refuses to move it for anyone."
+    },
+    {
+      "name": "Age of Conan",
+      "type": "video_game",
+      "why": "He loses days to it as Sheldor the Conqueror and has to be pulled away."
+    },
+    {
+      "name": "The Cheesecake Factory",
+      "type": "place",
+      "why": "Tuesday is burger night there and he orders the barbecue bacon cheeseburger every time."
+    },
+    {
+      "name": "Siam Palace",
+      "type": "place",
+      "why": "Monday is Thai food night and the order from Siam Palace is fixed."
+    },
+    {
+      "name": "Comic Center of Pasadena",
+      "type": "place",
+      "why": "Wednesday is new comic book day and he is at Stuart's store for it."
+    },
+    {
+      "name": "Leonard Nimoy",
+      "type": "person",
+      "why": "Penny's gift of a napkin Nimoy used and signed overwhelms him, and he hugs her."
+    },
+    {
+      "name": "Stephen Hawking",
+      "type": "person",
+      "why": "He faints when he finally meets him and plays Words with Friends with him afterwards."
+    },
+    {
+      "name": "Raiders of the Lost Ark",
+      "type": "movie",
+      "why": "He queues for the screening with 21 extra seconds and is crushed when Amy says Indiana Jones does not affect the plot."
+    },
+    {
+      "name": "Firefly",
+      "type": "tv_show",
+      "why": "The roommate agreement reserves Friday nights for watching it."
+    }
+  ],
+  "words": [
+    {
+      "word": "physics",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "The living room"
+      }
+    },
+    {
+      "word": "molecular",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "Leonard’s bedroom"
+      }
+    },
+    {
+      "word": "lactose",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Sheldon and Leonard’s apartment"
+      }
+    },
+    {
+      "word": "cloaking",
+      "where": {
+        "season": 1,
+        "episode": 14,
+        "scene": "The living room"
+      }
+    },
+    {
+      "word": "tangerine",
+      "where": {
+        "season": 1,
+        "episode": 17,
+        "scene": "The apartment living room"
+      }
+    },
+    {
+      "word": "dumpling",
+      "where": {
+        "season": 1,
+        "episode": 7,
+        "scene": "A Chinese restaurant"
+      }
+    },
+    {
+      "word": "titanium",
+      "where": {
+        "season": 1,
+        "episode": 12,
+        "scene": "Howard’s lab"
+      }
+    },
+    {
+      "word": "metaphor",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The Mars Rover control room"
+      }
+    },
+    {
+      "word": "quantum",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Sheldon and Leonard’s apartment"
+      }
+    },
+    {
+      "word": "scissors",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The apartment"
+      }
+    },
+    {
+      "word": "genetic",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "A corridor at a sperm bank"
+      }
+    },
+    {
+      "word": "positronium",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "Leonard’s bedroom"
+      }
+    },
+    {
+      "word": "quintessential",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The same"
+      }
+    },
+    {
+      "word": "slits",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "A corridor at a sperm bank"
+      }
+    },
+    {
+      "word": "defcon",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The same"
+      }
+    },
+    {
+      "word": "poncho",
+      "where": {
+        "season": 1,
+        "episode": 4,
+        "scene": "The stairwell of the apartment building"
+      }
+    },
+    {
+      "word": "ergo",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Outside Penny’s old apartment building"
+      }
+    },
+    {
+      "word": "premise",
+      "where": {
+        "season": 1,
+        "episode": 14,
+        "scene": "Later that night, Leonard is sitting in the time machine, turning the lights on and off"
+      }
+    },
+    {
+      "word": "rhetorical",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "The downstairs lobby"
+      }
+    },
+    {
+      "word": "inability",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The apartment"
+      }
+    },
+    {
+      "word": "equations",
+      "where": {
+        "season": 1,
+        "episode": 4,
+        "scene": "The apartment, Sheldon is in the kitchen cooking, Leonard enters"
+      }
+    },
+    {
+      "word": "rendered",
+      "where": {
+        "season": 1,
+        "episode": 12,
+        "scene": "The same, later that night"
+      }
+    },
+    {
+      "word": "sarcasm",
+      "where": {
+        "season": 1,
+        "episode": 2,
+        "scene": "Sheldon and Leonard’s living room, morning"
+      }
+    },
+    {
+      "word": "hypothesis",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Inside Sheldon and Leonard’s apartment"
+      }
+    },
+    {
+      "word": "particle",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "The living room"
+      }
+    },
+    {
+      "word": "apparent",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Sheldon and Leonard’s apartment"
+      }
+    },
+    {
+      "word": "imaginary",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Inside Sheldon and Leonard’s apartment"
+      }
+    },
+    {
+      "word": "observation",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "The downstairs lobby"
+      }
+    },
+    {
+      "word": "nanotubes",
+      "where": {
+        "season": 1,
+        "episode": 12,
+        "scene": "Howard’s lab"
+      }
+    },
+    {
+      "word": "semiotics",
+      "where": {
+        "season": 1,
+        "episode": 5,
+        "scene": "The hallway, Sheldon scuttles out of apartment door and crosses to Penny’s"
+      }
+    },
+    {
+      "word": "loofah",
+      "where": {
+        "season": 1,
+        "episode": 17,
+        "scene": "The lobby"
+      }
+    },
+    {
+      "word": "predisposition",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "The living room"
+      }
+    },
+    {
+      "word": "croutons",
+      "where": {
+        "season": 1,
+        "episode": 11,
+        "scene": "The Cheesecake Factory"
+      }
+    },
+    {
+      "word": "centrifuge",
+      "where": {
+        "season": 1,
+        "episode": 16,
+        "scene": "The store"
+      }
+    },
+    {
+      "word": "disembodied",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The apartment"
+      }
+    },
+    {
+      "word": "perspiration",
+      "where": {
+        "season": 1,
+        "episode": 1,
+        "scene": "Sheldon and Leonard’s apartment"
+      }
+    },
+    {
+      "word": "concise",
+      "where": {
+        "season": 1,
+        "episode": 16,
+        "scene": "The Cheesecake Factory"
+      }
+    },
+    {
+      "word": "schematic",
+      "where": {
+        "season": 1,
+        "episode": 12,
+        "scene": "The same, later that night"
+      }
+    },
+    {
+      "word": "symposium",
+      "where": {
+        "season": 1,
+        "episode": 10,
+        "scene": "Outside Penny’s door"
+      }
+    },
+    {
+      "word": "paradigm",
+      "where": {
+        "season": 1,
+        "episode": 8,
+        "scene": "The apartment"
+      }
+    }
+  ]
+}

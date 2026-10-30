@@ -231,8 +231,15 @@ export async function simulate(opts, { log = console.error } = {}) {
   const summary = { kind: "summary", run: runId, persona: persona.slug, level: lvl, arm, seeded: seed.seeded, ...totals, sound_match: totals.judged ? Number((totals.sound_sum / totals.judged).toFixed(2)) : null,
     fidelity: totals.fit_cards ? Number((totals.fit_hits / totals.fit_cards).toFixed(3)) : null, fidelity_rho: totals.rho_n ? Number((totals.rho_sum / totals.rho_n).toFixed(2)) : null, file };
   emit(summary);
+  // The run file goes to the server's media store too (POST /api/sim/runs), so the laptop needs no bucket credentials; the local copy stays.
+  let uploaded = null;
+  if (!opts.dryRun && token) {
+    const up = await call("POST", "/api/sim/runs", { run: runId, lines });
+    uploaded = up.status === 200 ? up.body.key : `not uploaded: ${up.status} ${up.body?.error ?? ""}`.trim();
+    say(`run file: ${uploaded}`);
+  }
   say(`done: ${totals.words} words, ${totals.cards} cards (${totals.ranked_cards} ranked, ${totals.limited_cards} limited, ${totals.favorite_hits} with a like, ${totals.favorite_first} first), practice ${totals.correct}/${totals.answers} (scripted), qloo ${totals.qloo_calls}, tokens ${totals.tokens}${totals.judged ? `, sound match ${summary.sound_match} over ${totals.judged} judged` : ""}${totals.fit_cards ? `, fidelity ${summary.fidelity} rho ${summary.fidelity_rho ?? "-"} over ${totals.fit_cards} ranked cards` : ""}${file ? `\n${file}` : ""}`);
-  return { run: runId, file, lines, summary };
+  return { run: runId, file, lines, summary, uploaded };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

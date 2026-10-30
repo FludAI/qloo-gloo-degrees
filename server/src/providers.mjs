@@ -14,9 +14,13 @@
 // fallback is recorded on the call's row. Nothing personal goes to either: the camera crop and the learner's
 // words go as they did before, and no identifier of the learner travels with them.
 import Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { q } from "./db.mjs";
 
 export const PROVIDERS = ["anthropic", "muse"];
+// A prompt's version: a short hash of its template text, so any change to the words a model is given shows as a
+// new version on the rows it answers (provider_calls.prompt) and as a split in the degrees report.
+export const promptVersion = (...texts) => createHash("sha256").update(texts.map(String).join("\n--\n")).digest("hex").slice(0, 8);
 export const MODELS = {
   anthropic: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5",
   muse: process.env.META_MODEL ?? "muse-spark-1.3",
@@ -146,7 +150,7 @@ const create = (p, body) => (p === "muse" ? museCreate(body) : (anthropic ??= ne
 // `row` is the id of the provider_calls row the call was logged on (null when `log` is off), so a caller that
 // judges the answer afterwards can add to its note (q.noteCall).
 // Throws on a provider error after logging it; throws MODEL_UNAVAILABLE when no backend has a key.
-export async function complete({ provider = "anthropic", task = "model", sid = null, log = true, brief_chars = 0, brief_dropped = false, ...body }) {
+export async function complete({ provider = "anthropic", task = "model", sid = null, log = true, brief_chars = 0, brief_dropped = false, prompt_version = null, ...body }) {
   const use = pick(provider);
   if (!use) throw Object.assign(new Error(`No model provider is configured for ${task}.`), { code: "MODEL_UNAVAILABLE" });
   const model = MODELS[use.provider];
@@ -158,10 +162,10 @@ export async function complete({ provider = "anthropic", task = "model", sid = n
     const stop = res.stop_reason ?? null;
     const base = res.note ?? (body.tools?.length && !(res.content ?? []).some((b) => b.type === "tool_use") ? "no_tool" : null);
     const note = brief_dropped ? [base, "brief_dropped"].filter(Boolean).join(",") : base;
-    const row = log ? Number(q.logModel.run(sid, use.provider, task, "ok", null, ms, Date.now(), model, usage.input, usage.output, use.fallback_from, stop, note, brief_chars).lastInsertRowid) : null;
-    return { res, provider: use.provider, model, fallback_from: use.fallback_from, usage, ms, stop, note, brief_chars, row };
+    const row = log ? Number(q.logModel.run(sid, use.provider, task, "ok", null, ms, Date.now(), model, usage.input, usage.output, use.fallback_from, stop, note, brief_chars, prompt_version).lastInsertRowid) : null;
+    return { res, provider: use.provider, model, fallback_from: use.fallback_from, usage, ms, stop, note, brief_chars, prompt_version, row };
   } catch (e) {
-    if (log) q.logModel.run(sid, use.provider, task, "error", null, performance.now() - t0, Date.now(), model, null, null, use.fallback_from, null, brief_dropped ? "brief_dropped" : null, brief_chars);
+    if (log) q.logModel.run(sid, use.provider, task, "error", null, performance.now() - t0, Date.now(), model, null, null, use.fallback_from, null, brief_dropped ? "brief_dropped" : null, brief_chars, prompt_version);
     e.provider = use.provider;
     throw e;
   }

@@ -93,7 +93,7 @@ if (!db.prepare("PRAGMA table_info(first_attempts)").all().some((c) => c.name ==
   }
   // Model calls (providers.mjs): which model answered, what it cost in tokens, and whether the arm asked for fell back.
   const calls = db.prepare("PRAGMA table_info(provider_calls)").all().map((c) => c.name);
-  for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"], ["stop", "TEXT"], ["note", "TEXT"], ["brief", "INTEGER"]]) {
+  for (const [col, type] of [["model", "TEXT"], ["tokens_in", "INTEGER"], ["tokens_out", "INTEGER"], ["fallback_from", "TEXT"], ["stop", "TEXT"], ["note", "TEXT"], ["brief", "INTEGER"], ["prompt", "TEXT"]]) {
     if (!calls.includes(col)) db.exec(`ALTER TABLE provider_calls ADD COLUMN ${col} ${type}`);
   }
 }
@@ -145,7 +145,7 @@ export const q = {
   editCue: db.prepare("UPDATE learner_cues SET connection = ? WHERE id = ? AND sid = ? AND removed_at IS NULL"),
   removeCue: db.prepare("UPDATE learner_cues SET removed_at = ? WHERE id = ? AND sid = ?"),
   logCall: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
-  logModel: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at, model, tokens_in, tokens_out, fallback_from, stop, note, brief) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+  logModel: db.prepare("INSERT INTO provider_calls (sid, provider, op, status, cache, duration_ms, created_at, model, tokens_in, tokens_out, fallback_from, stop, note, brief, prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   callCounts: db.prepare("SELECT provider, status, COUNT(*) AS n FROM provider_calls WHERE sid = ? GROUP BY provider, status"),
   // Add a word to a model row's note after the fact (the drafter marks a draft that came back without cards).
   noteCall: db.prepare("UPDATE provider_calls SET note = CASE WHEN note IS NULL OR note = '' THEN ?1 ELSE note || ',' || ?1 END WHERE id = ?2"),

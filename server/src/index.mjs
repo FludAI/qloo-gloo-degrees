@@ -18,7 +18,11 @@ import { assess, promptHints, bestHeard } from "./assess.mjs";
 import { deriveSkill, POLICY } from "./scheduler.mjs";
 import { listTerms, getTerm, findPrompt, publicTerm, publicPrompt, addTerms, reload as reloadContent, store as lessons } from "./content/index.mjs";
 import { ID as LESSON_ID, readField } from "./lessons.mjs";
-import { runCueAgent, runSyntheticAgent, agentMode, MODEL } from "./agent.mjs";
+import { runCueAgent, runSyntheticAgent, agentMode, MODEL, AGENT_PROMPT_VERSION } from "./agent.mjs";
+import { learningRecords, toLines, exportDay, startLearningExport, EVERY_MS as LEARNING_EVERY_MS } from "./learning.mjs";
+import { DRAFT_PROMPT_VERSION, RESOLVE_PROMPT_VERSION } from "./drafter.mjs";
+import { READ_PROMPT_VERSION } from "./reader.mjs";
+import { JUDGE_PROMPT_VERSION, FIT_PROMPT_VERSION } from "./judge.mjs";
 import { setVocabulary, resolveLocal, pickFromOcr, normalize } from "./resolve/index.mjs";
 import { resolveWithLlm, draftLesson, syntheticLesson, compilePacket, suggestField } from "./drafter.mjs";
 import { reviewLesson } from "./reviewer.mjs";
@@ -41,7 +45,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
 const MOCK = process.env.QLOO_MOCK === "1" || process.argv.includes("--mock");
 const PORT = Number(process.env.PORT ?? 8787);
-let snapshots = null; // the snapshot timer (snapshot.mjs), once the server listens
+let snapshots = null;
+let learning = null; // the learning export's timer and its last run (learning.mjs) // the snapshot timer (snapshot.mjs), once the server listens
 // Hosted demo gate: camera, voice, the agent and lesson drafting spend money; reviewed lessons stay open.
 const PASSCODE = String(process.env.DEMO_PASSCODE ?? "").trim();
 // Owner token for the lesson API and the /edit console. Separate from the passcode; unset = owner API off.
@@ -91,7 +96,7 @@ app.disable("x-powered-by");
 // Media routes carry a camera crop or a few seconds of PCM; everything else stays small.
 const smallJson = express.json({ limit: "32kb" });
 const mediaJson = express.json({ limit: "3mb" });
-app.use((req, res, next) => (["/api/glue", "/api/transcribe"].includes(req.path) ? mediaJson : smallJson)(req, res, next));
+app.use((req, res, next) => (["/api/glue", "/api/transcribe", "/api/sim/runs"].includes(req.path) ? mediaJson : smallJson)(req, res, next));
 
 // Server-issued anonymous session. A browser-supplied learner ID is never authorization.
 app.use((req, res, next) => {
@@ -174,6 +179,8 @@ app.get("/api/health", wrap(async (req, res) => {
     credits: { rules: credits.RULES, welcome: credits.CONFIG.welcome, word: credits.CONFIG.word, referral: credits.CONFIG.referral },
     memory: { snapshots: snapshotsEnabled() ? "on" : "off", every_ms: SNAPSHOT_EVERY_MS, instances_assumed: 1, restored_from: restoredFrom(), last_snapshot: snapshots?.last() ?? null, brief_reads: briefReadsOn() ? "on" : "off" },
     synthetic: { marking: SIM_TOKEN ? "on" : "off", persona: q.getLevel.get(req.sid)?.synthetic ?? null, judge: JUDGE_PROVIDER },
+    prompts: { draft: DRAFT_PROMPT_VERSION, resolve: RESOLVE_PROMPT_VERSION, agent: AGENT_PROMPT_VERSION, read: READ_PROMPT_VERSION, judge: JUDGE_PROMPT_VERSION, fit: FIT_PROMPT_VERSION },
+    learning: { every_ms: LEARNING_EVERY_MS, last: learning?.last ?? null },
     unavailable: ["pronunciation scoring", "glasses input", "mastery bonus", "encounter detection"] });
 }));
 
@@ -330,9 +337,9 @@ app.post("/api/cues/agent", gate, wrap(async (req, res) => {
     try {
       const brief = briefForPrompt(req.sid); // the learner brief (brief.mjs) rides beside the familiar list
       result = await runCueAgent({ term: t, familiar, run, focus, provider: req.arm, sid: req.sid, brief: brief.text, briefDropped: brief.dropped });
-      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null, null, brief.dropped ? "brief_dropped" : null, brief.chars);
+      q.logModel.run(req.sid, result.provider ?? req.arm, "cue_agent", result.status, null, performance.now() - t0, Date.now(), result.model ?? null, result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null, result.fallback_from ?? null, null, brief.dropped ? "brief_dropped" : null, brief.chars, AGENT_PROMPT_VERSION);
     } catch (e) {
-      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0);
+      q.logModel.run(req.sid, e.provider ?? req.arm, "cue_agent", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0, AGENT_PROMPT_VERSION);
       result = { status: "error", reason: e.status ? `Model provider error (${e.status}).` : "Model provider error.", cues: [], trace: [] };
     }
   } else if (MOCK) {
@@ -400,7 +407,7 @@ app.post("/api/glue", wrap(async (req, res) => {
       if (!lim.ok) return res.status(429).json({ error: lim.reason });
       const t0 = performance.now();
       try { read = await readWord({ image, mime, provider: req.arm, sid: req.sid }); }
-      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0); console.error("read_word:", e.message);
+      catch (e) { q.logModel.run(req.sid, e.provider ?? req.arm, "read_word", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0, READ_PROMPT_VERSION); console.error("read_word:", e.message);
         return res.status(502).json({ error: "Couldn't read the frame right now. Try again, say it, or type it." }); }
     }
     if (!read.word) return res.status(422).json({ error: "No word in the frame. Get closer and hold steady, or say it." });
@@ -695,7 +702,7 @@ app.post("/api/sim/judge", sim, wrap(async (req, res) => {
   const t0 = performance.now();
   let out;
   try { out = await judgeHook({ word: t.title, part: role.part ?? role.label, sound_like: role.sound_like ?? null, label: cue.label, connection: cue.connection, provider, sid: req.sid }); }
-  catch (e) { q.logModel.run(req.sid, e.provider ?? provider, "judge_hook", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0); console.error("judge_hook:", e.message);
+  catch (e) { q.logModel.run(req.sid, e.provider ?? provider, "judge_hook", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0, JUDGE_PROMPT_VERSION); console.error("judge_hook:", e.message);
     return res.status(502).json({ status: "error", error: "The judge did not answer." }); }
   q.judgeCue.run(out.score, out.provider, out.model, out.reason, cue.id, req.sid);
   res.json({ status: "ok", cue_id: cue.id, label: cue.label, part: role.part ?? role.label, ...out });
@@ -746,11 +753,40 @@ app.post("/api/sim/fit", sim, wrap(async (req, res) => {
   const t0 = performance.now();
   let out;
   try { out = await judgeFit({ character, likes, question: role.pick?.question ?? "", names: shown.map((o) => o.name), provider, sid: req.sid }); }
-  catch (e) { q.logModel.run(req.sid, e.provider ?? provider, "judge_fit", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0); console.error("judge_fit:", e.message);
+  catch (e) { q.logModel.run(req.sid, e.provider ?? provider, "judge_fit", "error", null, performance.now() - t0, Date.now(), null, null, null, null, null, null, 0, FIT_PROMPT_VERSION); console.error("judge_fit:", e.message);
     return res.status(502).json({ status: "error", error: "The judge did not answer." }); }
   const a = agreement(ranked, out.fits);
   q.putFit.run(req.sid, t.id, role.id, ranked[0], a.judge_top.join("|"), a.top_hit, a.rho, JSON.stringify(out.fits), out.provider, out.model, Date.now());
   res.json({ status: "ok", qloo_top: ranked[0], qloo_order: ranked, judge_top: a.judge_top, top_hit: a.top_hit, rho: a.rho, fits: out.fits, provider: out.provider, model: out.model });
+}));
+
+// The learning record (learning.mjs): one line per card shown, for ad hoc pulls; the day's files go to the store on a timer.
+app.get("/api/admin/learning", admin, (req, res) => {
+  const since = Number(req.query.since) || Date.now() - 48 * 3600e3;
+  const until = Number(req.query.until) || Infinity;
+  const { records, dropped } = learningRecords(db, { since, until, termOf: termFor });
+  if (req.query.format === "jsonl") return res.type("application/x-ndjson").send(toLines(records));
+  res.json({ since, until: until === Infinity ? null : until, lines: records.length, dropped, records });
+});
+app.post("/api/admin/learning/export", admin, wrap(async (req, res) => {
+  const day = Number(req.body?.day) || (typeof req.body?.day === "string" && !Number.isNaN(Date.parse(req.body.day)) ? Date.parse(req.body.day) : Date.now());
+  const out = await exportDay({ db, media, termOf: termFor, day });
+  if (learning) learning.last = out;
+  res.json(out);
+}));
+
+// A simulator run's file, kept in the store beside the day's learning lines (the laptop needs no bucket credentials).
+app.post("/api/sim/runs", sim, wrap(async (req, res) => {
+  const run = String(req.body?.run ?? "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{7,99}$/.test(run)) return res.status(400).json({ error: "run is the run id" });
+  const lines = Array.isArray(req.body?.lines) ? req.body.lines.slice(0, 5000) : null;
+  if (!lines?.length) return res.status(400).json({ error: "lines is required" });
+  const text = lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join("\n") + "\n";
+  const pii = findPersonalData(text);
+  if (pii) return res.status(400).json({ error: `That looks like it contains a ${pii}.` });
+  const key = `sim-runs/${run.toLowerCase()}.jsonl`; // store keys are lowercase (media.mjs)
+  await media.put(key, Buffer.from(text), "application/x-ndjson");
+  res.json({ key, lines: lines.length, bytes: Buffer.byteLength(text) });
 }));
 
 // The line a report opens with after a restore: the memory the rows come from spans a redeploy.
@@ -917,3 +953,4 @@ media.mode().then((m) => console.log(`media: ${m}`)); // choose the store now, n
 const server = app.listen(PORT, () => console.log(`qloo-gloo on :${PORT} · Qloo ${MOCK ? "MOCK" : "live"} · agent ${agentMode()} · engine ${ENGINE}${PASSCODE ? " · passcode gate on" : ""}`));
 // Learner memory across redeploys (snapshot.mjs): the database to the store on a timer and at SIGTERM; boot.mjs restored it.
 if (snapshotsEnabled()) snapshots = createSnapshotter({ db, path: DB_PATH, media, writes }).start({ server });
+if (process.env.LEARNING_EXPORT !== "0") learning = startLearningExport({ db, media, termOf: termFor });

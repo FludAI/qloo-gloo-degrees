@@ -3,7 +3,7 @@
 // on the one thing a sound hook is for. The score goes on the cue row with the provider and model that gave it,
 // and the degrees report labels the column "judged by a model". Nothing personal travels: the word, the part,
 // the hook's public name and the lesson's own connection line.
-import { complete, toolCall } from "./providers.mjs";
+import { complete, toolCall, promptVersion } from "./providers.mjs";
 
 export const JUDGE_PROVIDER = process.env.SIM_JUDGE_PROVIDER ?? "anthropic";
 const TOOL = {
@@ -14,9 +14,10 @@ const TOOL = {
     reason: { type: "string", description: "One short sentence" } }, required: ["score", "reason"] },
 };
 
+export let JUDGE_PROMPT_VERSION = null;
 export async function judgeHook({ word, part, sound_like = null, label, connection = "", provider = JUDGE_PROVIDER, sid = null }) {
   const { res, provider: used, model } = await complete({
-    provider, task: "judge_hook", sid, max_tokens: 300,
+    provider, task: "judge_hook", sid, max_tokens: 300, prompt_version: JUDGE_PROMPT_VERSION,
     system: `You judge one memory hook for a hard word. The hook is a public name chosen because it is supposed to sound like one part of the word. Score the SOUND match only, 0 to 3, as the tool describes. Ignore meaning, fame, taste and whether the name is a good hook in other ways; a name that merely starts with the same letter scores 0.\n\nRespond only by calling the ${TOOL.name} tool.`,
     tools: [TOOL], tool_choice: { type: "auto" },
     messages: [{ role: "user", content: `Word: ${word}\nPart: ${part}${sound_like ? ` (the lesson says it sounds like "${sound_like}")` : ""}\nHook name: ${label}${connection ? `\nThe lesson's line for it: ${connection}` : ""}` }],
@@ -42,9 +43,11 @@ const FIT_TOOL = {
       fit: { type: "integer", minimum: 0, maximum: 3, description: "0 the character would never pick it; 1 plausible; 2 fits their shown tastes; 3 this is the one they would pick" } },
       required: ["name", "fit"] } } }, required: ["fits"] },
 };
+JUDGE_PROMPT_VERSION = promptVersion(judgeHook.toString(), JSON.stringify(TOOL));
+export let FIT_PROMPT_VERSION = null;
 export async function judgeFit({ character, likes, question = "", names, provider = JUDGE_PROVIDER, sid = null }) {
   const { res, provider: used, model } = await complete({
-    provider, task: "judge_fit", sid, max_tokens: 500,
+    provider, task: "judge_fit", sid, max_tokens: 500, prompt_version: FIT_PROMPT_VERSION,
     system: `You judge which public names a fictional film or television character would pick on a card, given only what the character is shown liking on screen (the canon likes listed) and the character as written. Score every name, 0 to 3, as the tool describes. Judge from the canon likes and the character's known tastes, not from popularity.\n\nRespond only by calling the ${FIT_TOOL.name} tool.`,
     tools: [FIT_TOOL], tool_choice: { type: "auto" },
     messages: [{ role: "user", content: `Character: ${character.name} (${character.work?.title ?? "?"}, ${character.work?.kind ?? ""} ${character.work?.year ?? ""})\nCanon likes: ${likes.map((l) => `${l.name} (${l.type})`).join("; ") || "none listed"}${question ? `\nThe card asks: ${question}` : ""}\nNames on the card: ${names.join("; ")}` }],
@@ -60,6 +63,8 @@ export async function judgeFit({ character, likes, question = "", names, provide
   if (out.every((f) => f.fit == null)) throw new Error("judge scored none of the names");
   return { fits: out, provider: used, model };
 }
+
+FIT_PROMPT_VERSION = promptVersion(judgeFit.toString(), JSON.stringify(FIT_TOOL));
 
 // Agreement between Qloo's order of a ranked card and the judge's fit: whether Qloo's top name is one the judge
 // rates highest (ties count), and Spearman's rho between Qloo's order and the fit order (ties averaged), or null

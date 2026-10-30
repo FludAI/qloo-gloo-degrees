@@ -16,6 +16,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const SERVER = fileURLToPath(new URL("../src/index.mjs", import.meta.url));
 const MCP = fileURLToPath(new URL("../../scripts/gloo-lessons-mcp.mjs", import.meta.url));
 const PORT = 8799;
+const MEDIA_DIR = mkdtempSync(join(tmpdir(), "gloo-api-media-")); // the test server's media store (local), read back for the run upload and the learning export
 let fake, proc, calls = 0, ttsCalls = 0, reviewInstruction = null;
 
 // Fake Anthropic Messages API: one Qloo describe call, then a proposal with one real and one invented ID.
@@ -151,7 +152,7 @@ before(async () => {
   }).listen(8798);
   proc = spawn(process.execPath, [SERVER, "--mock"], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: ":memory:", ANTHROPIC_API_KEY: "test-not-a-key", ANTHROPIC_BASE_URL: "http://localhost:8798",
-      TTS_ENDPOINT: "http://localhost:8798/tts", MEDIA_LOCAL: "1", MEDIA_DIR: mkdtempSync(join(tmpdir(), "gloo-api-media-")), LIMIT_TTS_PER_SESSION_HOUR: "2",
+      TTS_ENDPOINT: "http://localhost:8798/tts", MEDIA_LOCAL: "1", MEDIA_DIR, LIMIT_TTS_PER_SESSION_HOUR: "2",
       ADMIN_TOKEN: "test-owner-token", SIM_TOKEN: "test-sim-token", QLOO_LEVELS: "1", // every session draws degree 1 (production's behavior); the degrees test forces others
       META_API_KEY: "test-muse-key", META_BASE_URL: "http://localhost:8798/muse", MODEL_ARMS: "anthropic" }, // the fake Meta backend; sessions draw the anthropic arm unless forced
     stdio: "ignore",
@@ -948,6 +949,38 @@ test("the simulator's dry run against the mock server: a fixture persona plays t
     assert.equal(j.summary.fit_cards, rankedCards.length); assert.equal(j.summary.fidelity != null, rankedCards.length > 0);
     const unseeded = await simulate(parseArgs(["--base", `http://localhost:${PORT}`, "--persona", "fixture:ferris-bueller", "--level", "1", "--words", "1", "--seed-likes", "off", "--dry-run", "--quiet"]));
     assert.equal(unseeded.lines[0].seed.on, false); assert.equal(unseeded.lines[1].cards[0].ranked, false, "without seeds the first card is editorial");
+    // The judged run's file went to the store under sim-runs/, line for line; the dry run uploaded nothing.
+    assert.equal(j.uploaded, `sim-runs/${j.run.toLowerCase()}.jsonl`); assert.equal(unseeded.uploaded, null);
+    assert.equal(readFileSync(join(MEDIA_DIR, "sim-runs", `${j.run.toLowerCase()}.jsonl`), "utf8"), readFileSync(j.file, "utf8"));
+    // Every model row of the judged run carries its prompt's version; health lists the versions; the arm table shows them.
+    const h = (await (await fetch(`http://localhost:${PORT}/api/health`)).json()).prompts;
+    assert.ok(["draft", "resolve", "agent", "read", "judge", "fit"].every((k) => /^[a-f0-9]{8}$/.test(h[k])), JSON.stringify(h));
+    const admin = { headers: { "x-gloo-admin": "test-owner-token" } };
+    const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text&include=synthetic`, admin)).text();
+    assert.match(text, /prompt versions/); assert.match(text, new RegExp(`judge_hook ${h.judge}×\\d+`)); assert.match(text, new RegExp(`draft ${h.draft}×\\d+`));
+    const rep = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, admin)).json();
+    assert.ok(rep.models.find((m) => m.arm === "anthropic").prompts.draft_lesson[h.draft] >= 1, "real sessions drafted under the current prompt");
+    assert.ok(rep.synthetic.models.find((m) => m.arm === "anthropic").prompts.judge_hook[h.judge] >= 1, "the judged synthetic run's rows carry the judge prompt's version");
+    // The learning record: one line per card the runs showed, with the persona, the pick and the judges on it.
+    const learn = await (await fetch(`http://localhost:${PORT}/api/admin/learning?since=${Date.now() - 3600e3}`, admin)).json();
+    assert.equal((await fetch(`http://localhost:${PORT}/api/admin/learning`)).status, 401);
+    const mine = learn.records.filter((r) => r.persona === "ferris-bueller" && r.judge);
+    assert.ok(mine.length >= 2, JSON.stringify(learn.records.map((r) => [r.persona, r.word, r.role])));
+    const line = mine[0];
+    assert.ok(line.word && line.part && line.candidates.length >= 2 && line.pick.hook_source && Number.isInteger(line.judge.score) && line.offered.order.length >= 1, JSON.stringify(line));
+    assert.ok(!JSON.stringify(learn.records).includes("gloo_sid"));
+    const fitted = mine.find((r) => r.fit); if (fitted) assert.equal(fitted.fit.qloo_top, fitted.offered.order[0].name);
+    const drafted = learn.records.find((r) => r.provisional && r.prompt);
+    assert.ok(drafted && drafted.prompt.version === h.draft, JSON.stringify(drafted?.prompt));
+    const jsonl = await (await fetch(`http://localhost:${PORT}/api/admin/learning?since=${Date.now() - 3600e3}&format=jsonl`, admin)).text();
+    assert.equal(jsonl.trim().split("\n").length, learn.lines);
+    // The day's export: forced now, the file in the store holds today's lines; forced again, nothing changes.
+    const ex = await (await fetch(`http://localhost:${PORT}/api/admin/learning/export`, { method: "POST", ...admin, headers: { ...admin.headers, "content-type": "application/json" }, body: "{}" })).json();
+    assert.ok(ex.key.startsWith("learning/") && ex.lines >= learn.lines && ex.written === true, JSON.stringify(ex));
+    assert.equal(readFileSync(join(MEDIA_DIR, ex.key), "utf8").trim().split("\n").length, ex.lines);
+    const ex2 = await (await fetch(`http://localhost:${PORT}/api/admin/learning/export`, { method: "POST", ...admin, headers: { ...admin.headers, "content-type": "application/json" }, body: "{}" })).json();
+    assert.equal(ex2.written, false); assert.equal(ex2.lines, ex.lines);
+    assert.equal((await (await fetch(`http://localhost:${PORT}/api/health`)).json()).learning.last.key, ex.key);
     const d = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
     const ferris = d.synthetic.personas.find((p) => p.persona === "ferris-bueller");
     assert.equal(ferris.sound_match, 2); assert.equal(ferris.level, 1);

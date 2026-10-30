@@ -2,7 +2,7 @@
 // Qloo grounds WHICH cultural entities a taste cluster knows; Claude decides HOW an entity can
 // carry a specific part of the concept (a sound, a meaning, an operation). The learner then
 // confirms recognition. Qloo affinity never sets familiarity, mastery or retention.
-import { complete, anyAvailable, MODELS } from "./providers.mjs";
+import { complete, anyAvailable, MODELS, promptVersion } from "./providers.mjs";
 
 export const MODEL = MODELS.anthropic;
 const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 8);
@@ -105,6 +105,7 @@ function validate(term, proposal, seenIds) {
 // `provider` is the session's model arm; `sid` goes on each step's provider_calls row (task cue_agent_step).
 // `brief` is the learner brief (brief.mjs: public names, lesson titles, outcomes), or null; `briefDropped` says the
 // guard kept one out, which every step's row then notes.
+export const AGENT_PROMPT_VERSION = promptVersion(systemPrompt.toString());
 export async function runCueAgent({ term, familiar, run, focus = null, provider = "anthropic", sid = null, brief = null, briefDropped = false }) {
   if (agentMode() !== "live") return { status: "unavailable", reason: "No model provider is configured on the server.", cues: [], trace: [] };
 
@@ -119,7 +120,7 @@ export async function runCueAgent({ term, familiar, run, focus = null, provider 
   for (let step = 0; step < MAX_STEPS; step++) {
     // Current models reject forced tool choice; at the step limit the model is told to finish instead.
     if (step === MAX_STEPS - 1) messages.push({ role: "user", content: "Step limit reached. Call propose_cues now with the best cues from the Qloo results you already have." });
-    const out = await complete({ provider, task: "cue_agent_step", sid, brief_chars: brief ? brief.length : 0, brief_dropped: briefDropped, max_tokens: 1500, system: systemPrompt(term), tools, messages, tool_choice: { type: "auto" } });
+    const out = await complete({ provider, task: "cue_agent_step", sid, brief_chars: brief ? brief.length : 0, brief_dropped: briefDropped, prompt_version: AGENT_PROMPT_VERSION, max_tokens: 1500, system: systemPrompt(term), tools, messages, tool_choice: { type: "auto" } });
     const res = out.res;
     used = { provider: out.provider, model: out.model, fallback_from: out.fallback_from };
     usage.input_tokens += res.usage?.input_tokens ?? 0;

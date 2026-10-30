@@ -22,7 +22,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
   const seeds = db.prepare("SELECT COUNT(*) AS n FROM learner_cues WHERE sid = ? AND removed_at IS NULL AND hook_source = 'seed'");
   const fits = db.prepare("SELECT top_hit, rho FROM card_fits WHERE sid = ?");
   const attempts = db.prepare("SELECT outcome, independent FROM attempts WHERE sid = ?");
-  const calls = db.prepare("SELECT provider, op, status, cache, duration_ms, model, tokens_in, tokens_out, fallback_from, stop, note FROM provider_calls WHERE sid = ?");
+  const calls = db.prepare("SELECT provider, op, status, cache, duration_ms, model, tokens_in, tokens_out, fallback_from, stop, note, prompt FROM provider_calls WHERE sid = ?");
   const drafts = db.prepare("SELECT id, created_at FROM provisional_terms WHERE sid = ? ORDER BY created_at, rowid");
   const draftRows = db.prepare("SELECT brief, created_at FROM provider_calls WHERE sid = ? AND op = 'draft_lesson' AND status = 'ok' AND (note IS NULL OR (note NOT LIKE '%no_tool%' AND note NOT LIKE '%no_cards%')) ORDER BY created_at, id");
   const hasArt = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'art'").get();
@@ -35,7 +35,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
     const s = { cards: 0, tailored_cards: 0, unrankable_cards: 0, limited_cards: 0, seeds: 0, fit_cards: 0, fit_hits: 0, rho_sum: 0, rho_n: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
       answers: 0, correct: 0, independent: 0, recall: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
       qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, no_cards: 0, drafted_briefed: 0, accepted_briefed: 0, drafted_plain: 0, accepted_plain: 0, tokens_in: 0, tokens_out: 0,
-      build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) };
+      build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])), prompts: {} };
     const o = offers.all(sid), p = picks.all(sid), a = attempts.all(sid), c = calls.all(sid), d = drafts.all(sid);
     const pickAt = new Map(p.map((x) => [`${x.term_id}|${x.role}`, x]));
     for (const card of o) {
@@ -64,6 +64,7 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
       if (x.op === "cue_agent") s.agent_calls++;
       if (x.op === "read_word") { s.reads_tried++; if (x.status === "ok") s.reads_ok++; }
       if (x.op === "draft_lesson") { s.drafts_tried++; if (x.status === "ok") s.drafts_ok++; }
+      if (x.prompt) { const v = (s.prompts[x.op] ??= {}); v[x.prompt] = (v[x.prompt] ?? 0) + 1; } // which prompt version answered (providers.mjs promptVersion)
       if (x.op === "cue_agent_step") continue; // steps roll up into the run's row
       s.model_calls++; if (x.status === "error") s.model_errors++; if (x.fallback_from) s.fallbacks++;
       if (x.stop === "max_tokens") s.model_cut++; if (String(x.note ?? "").includes("tool_from_text")) s.text_tools++; if (String(x.note ?? "").includes("no_cards")) s.no_cards++;
@@ -75,11 +76,12 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3, include = 
   const blank = (extra) => ({ ...extra, sessions: 0, forced: 0, cards: 0, tailored_cards: 0, unrankable_cards: 0, limited_cards: 0, seeds: 0, fit_cards: 0, fit_hits: 0, rho_sum: 0, rho_n: 0, tiles: 0, pictured_tiles: 0, picks: 0, first_tile_picks: 0, taste_picks: 0, own_picks: 0, agent_picks: 0, skipped_cards: 0, judged: 0, sound_sum: 0,
     answers: 0, correct: 0, independent: 0, recall_sessions: 0, drafted_words: 0, accepted_drafts: 0, reads_tried: 0, reads_ok: 0, drafts_tried: 0, drafts_ok: 0,
     qloo_calls: 0, qloo_cache_hits: 0, agent_calls: 0, model_calls: 0, model_errors: 0, fallbacks: 0, model_cut: 0, text_tools: 0, no_cards: 0, drafted_briefed: 0, accepted_briefed: 0, drafted_plain: 0, accepted_plain: 0, tokens_in: 0, tokens_out: 0,
-    build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])) });
+    build_ms: [], pick_ms: [], ms: Object.fromEntries(MODEL_OPS.map((op) => [op, []])), prompts: {} });
   const add = (g, s, forced) => {
     g.sessions++; if (forced) g.forced++;
     for (const k of Object.keys(s)) {
       if (k === "recall") g.recall_sessions += s.recall;
+      else if (k === "prompts") for (const [op, vs] of Object.entries(s.prompts)) { const v = (g.prompts[op] ??= {}); for (const [ver, n] of Object.entries(vs)) v[ver] = (v[ver] ?? 0) + n; }
       else if (k === "ms") for (const op of MODEL_OPS) g.ms[op].push(...s.ms[op]);
       else if (Array.isArray(s[k])) g[k].push(...s[k]);
       else g[k] += s[k];
@@ -148,9 +150,11 @@ export function degreesText(report) {
   const levelRows = report.levels.map((g) => [g.level ?? "?", g.degree, sessions(g), String(g.cards), String(g.tailored_cards), String(g.unrankable_cards),
     pct(g.rates.first_tile), pct(g.rates.picture), pct(g.rates.skip), `${g.correct}/${g.answers}`, `${g.independent} (${g.recall_sessions} sess)`, String(g.own_picks),
     String(g.qloo_calls), String(g.qloo_cache_hits), String(g.agent_calls), String(g.agent_picks), String(g.drafted_words), ms(g.median_build_ms), ms(g.median_pick_ms)]);
+  // Prompt versions an arm answered under, per task, with the calls each took: a change in a prompt shows as a split here.
+  const prompts = (g) => Object.entries(g.prompts ?? {}).filter(([op]) => MODEL_OPS.includes(op) || op.startsWith("judge")).map(([op, vs]) => `${op.replace("_lesson", "").replace("_word", "").replace("cue_", "").replace("_term", "")} ${Object.entries(vs).map(([v, n]) => `${v}×${n}`).join(",")}`).join(" ") || "-";
   const modelRows = report.models.map((g) => [g.arm, sessions(g), `${g.reads_ok}/${g.reads_tried}`, `${g.drafts_ok}/${g.drafts_tried}`, pct(g.rates.draft_accepted), `${g.drafted_briefed}: ${pct(g.rates.draft_accepted_briefed)}/${pct(g.rates.draft_accepted_plain)}`,
     pct(g.rates.picture), pct(g.rates.first_tile), `${g.correct}/${g.answers}`, String(g.independent), String(g.model_calls), String(g.model_errors), String(g.fallbacks), `${g.model_cut}/${g.text_tools}/${g.no_cards}`,
-    `${g.tokens_in}/${g.tokens_out}`, ms(g.median_ms.read_word), ms(g.median_ms.draft_lesson), ms(g.median_ms.cue_agent)]);
+    `${g.tokens_in}/${g.tokens_out}`, ms(g.median_ms.read_word), ms(g.median_ms.draft_lesson), ms(g.median_ms.cue_agent), prompts(g)]);
   const cellRows = report.cells.map((g) => [g.level ?? "?", g.arm, sessions(g), String(g.cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.independent), String(g.drafted_words), String(g.agent_picks)]);
   const syn = report.synthetic ?? { sessions: 0, personas: [] };
   const score = (g) => (g.sound_match == null ? "-" : `${g.sound_match} (${g.judged})`);
@@ -165,9 +169,9 @@ export function degreesText(report) {
   return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}${report.synthetic_sessions ? report.include_synthetic ? ` (${report.synthetic_sessions} synthetic included)` : ` real (+${report.synthetic_sessions} synthetic, below)` : ""}`, "", "by degree of Qloo",
     ...table(["level", "degree", "sessions", "cards", "tailored", "1-type", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"], levelRows),
     "", "by model arm",
-    ...table(["arm", "sessions", "reads", "drafts", "accepted", "briefed: acc b/p", "pictures", "1st-tile", "practice", "recall", "calls", "errors", "fallbacks", "cut/text/no-cards", "tokens in/out", "read ms", "draft ms", "agent ms"], modelRows),
+    ...table(["arm", "sessions", "reads", "drafts", "accepted", "briefed: acc b/p", "pictures", "1st-tile", "practice", "recall", "calls", "errors", "fallbacks", "cut/text/no-cards", "tokens in/out", "read ms", "draft ms", "agent ms", "prompt versions"], modelRows),
     "", "by degree and arm",
     ...table(["level", "arm", "sessions", "cards", "1st-tile", "pictures", "practice", "recall", "drafts", "agent-picks"], cellRows),
     ...synthetic,
-    "", "1-type: cards left editorial because no two names shared a Qloo type (nothing for rank to compare); 1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); briefed: drafts whose prompt carried the learner brief, then acceptance with a brief / without; cut/text/no-cards: model answers cut at the output cap / tool calls the model wrote as JSON text / drafts that came back without a pick card (redrafted at four options, never shipped); build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
+    "", "1-type: cards left editorial because no two names shared a Qloo type (nothing for rank to compare); 1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); briefed: drafts whose prompt carried the learner brief, then acceptance with a brief / without; cut/text/no-cards: model answers cut at the output cap / tool calls the model wrote as JSON text / drafts that came back without a pick card (redrafted at four options, never shipped); prompt versions: the hash of each task's prompt text with the calls it answered, so a prompt change shows as a split; build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
 }

@@ -1,7 +1,9 @@
 // The degrees report: every session since a point in time, split by its degree of Qloo (level.mjs) and by its
 // model arm (providers.mjs), with the outcomes that say whether taste made the hooks stick and whether the
 // model changed anything. Built from rows the app already keeps: pick cards as offered (pick_offers), picks
-// (learner_cues), practice (attempts), provider calls. Sessions are cookies, not people.
+// (learner_cues), practice (attempts), provider calls. Sessions are cookies, not people. The thesis metric,
+// recall by hook source and review stage, is computed in recall.mjs and reported after the three splits.
+import { recallByHook, recallCell } from "./recall.mjs";
 const LEVELS = [0, 1, 2, 3];
 const NAMES = { 0: "editorial", 1: "rerank", 2: "qloo cards", 3: "agent doorway" };
 const ARMS = ["anthropic", "muse"];
@@ -101,13 +103,17 @@ export function degreesReport(db, { since = Date.now() - 48 * 3600e3 } = {}) {
     add(cells.get(key), s, qloo_forced || model_forced);
   }
   const order = (x, y) => (x.level ?? 9) - (y.level ?? 9) || String(x.arm ?? "").localeCompare(String(y.arm ?? ""));
+  // Recall by hook source and review stage over the same sessions, then by level and by arm.
+  const recall = recallByHook(db, learners.map((l) => ({ sid: l.sid, level: LEVELS.includes(l.qloo_level) ? l.qloo_level : null, arm: ARMS.includes(l.model_arm) ? l.model_arm : null })),
+    { levelName: (l) => (l == null ? "unassigned" : NAMES[l]) });
   return { since, sessions: learners.length,
     levels: [...byLevel.values()].sort(order).map(finish),
     models: [...byArm.values()].sort((x, y) => ARMS.indexOf(x.arm) - ARMS.indexOf(y.arm)).map(finish),
-    cells: [...cells.values()].sort(order).map(finish) };
+    cells: [...cells.values()].sort(order).map(finish),
+    recall };
 }
 
-// Plain-text tables for a terminal: one row per level, one per model arm, one per level and arm.
+// Plain-text tables for a terminal: one row per level, one per model arm, one per level and arm, then recall by hook source and stage.
 export function degreesText(report) {
   const pct = (x) => (x == null ? "-" : `${Math.round(x * 100)}%`);
   const ms = (x) => (x == null ? "-" : `${x}ms`);
@@ -124,11 +130,25 @@ export function degreesText(report) {
     pct(g.rates.picture), pct(g.rates.first_tile), `${g.correct}/${g.answers}`, String(g.independent), String(g.model_calls), String(g.model_errors), String(g.fallbacks), `${g.model_cut}/${g.text_tools}`,
     `${g.tokens_in}/${g.tokens_out}`, ms(g.median_ms.read_word), ms(g.median_ms.draft_lesson), ms(g.median_ms.cue_agent)]);
   const cellRows = report.cells.map((g) => [g.level ?? "?", g.arm, sessions(g), String(g.cards), pct(g.rates.first_tile), pct(g.rates.picture), `${g.correct}/${g.answers}`, String(g.independent), String(g.drafted_words), String(g.agent_picks)]);
+  // Recall by hook source: one row per source, one column per review stage, independent correct over answers, then a total.
+  const recall = report.recall ?? { stages: [], sources: [], by_level: [], by_arm: [], note: "" };
+  const stageCells = (r) => [...recall.stages.map((st) => recallCell(r.stages[st])), recallCell(r.total)];
+  const stageHead = [...recall.stages, "total"];
+  const recallRows = recall.sources.map((r) => [r.source, ...stageCells(r)]);
+  const recallLevelRows = recall.by_level.map((r) => [r.level ?? "?", r.source, ...stageCells(r)]);
+  const recallArmRows = recall.by_arm.map((r) => [r.arm, r.source, ...stageCells(r)]);
   return [`sessions since ${new Date(report.since).toISOString()}: ${report.sessions}`, "", "by degree of Qloo",
     ...table(["level", "degree", "sessions", "cards", "tailored", "1st-tile", "pictures", "skip", "practice", "recall", "own", "qloo", "hits", "agent", "agent-picks", "drafts", "build", "to-pick"], levelRows),
     "", "by model arm",
     ...table(["arm", "sessions", "reads", "drafts", "accepted", "briefed: acc b/p", "pictures", "1st-tile", "practice", "recall", "calls", "errors", "fallbacks", "cut/text", "tokens in/out", "read ms", "draft ms", "agent ms"], modelRows),
     "", "by degree and arm",
     ...table(["level", "arm", "sessions", "cards", "1st-tile", "pictures", "practice", "recall", "drafts", "agent-picks"], cellRows),
+    "", "recall by hook source",
+    ...table(["hook", ...stageHead], recallRows),
+    "", "recall by hook source and degree",
+    ...table(["level", "hook", ...stageHead], recallLevelRows),
+    "", "recall by hook source and arm",
+    ...table(["arm", "hook", ...stageHead], recallArmRows),
+    "", recall.note,
     "", "1st-tile: picks of the first tile over all picks; pictures: tiles with an image; skip: cards offered that got no pick; practice: correct/answers; recall: independent correct answers (sessions with one); briefed: drafts whose prompt carried the learner brief, then acceptance with a brief / without; cut/text: model answers cut at the output cap / tool calls the model wrote as JSON text; build: median ms to build a card; to-pick: median ms from card to pick; reads/drafts: ok/tried; accepted: drafted words the learner went on to pick a hook in; tokens: a cost proxy, summed; ms: median model latency per task"].join("\n") + "\n";
 }

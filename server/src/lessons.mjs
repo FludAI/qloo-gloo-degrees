@@ -100,9 +100,10 @@ export function validatePacket(p) {
   if (p.components != null && !(Array.isArray(p.components) && p.components.every((c) => c && isStr(c.part, 40) && isStr(c.meaning, 120) && optStr(c.cue, 160)))) bad("components: a list of { part, meaning, cue? }");
   if (p.first_attempt != null && !(typeof p.first_attempt === "object" && isStr(p.first_attempt.question, 300))) bad("first_attempt.question: a non-empty string");
 
+  const roleIds = new Set();
   if (!Array.isArray(p.roles) || !p.roles.length || p.roles.length > 6) bad("roles: 1 to 6 roles");
   else {
-    const ids = new Set();
+    const ids = roleIds;
     p.roles.forEach((r, i) => {
       const at = `roles[${i}]`;
       if (!r || typeof r !== "object") return bad(`${at}: an object`);
@@ -150,6 +151,7 @@ export function validatePacket(p) {
       if (!q || typeof q !== "object") return bad(`${at}: an object`);
       if (!isStr(q.id, 60)) bad(`${at}.id: a non-empty string`);
       else if (ids.has(q.id)) bad(`${at}.id: duplicate "${q.id}"`); else ids.add(q.id);
+      if (q.role != null && !(typeof q.role === "string" && roleIds.has(q.role))) bad(`${at}.role: the id of one of the roles (the word part the prompt tests), or null for a whole-word prompt`);
       if (!SKILLS.includes(q.skill)) bad(`${at}.skill: one of ${SKILLS.join(", ")}`);
       if (!TYPES.includes(q.type)) bad(`${at}.type: one of ${TYPES.join(", ")}`);
       if (!isStr(q.question, 300)) bad(`${at}.question: a non-empty string`);
@@ -184,7 +186,7 @@ const TOP_LISTS = ["aliases", "components", "family", "distinctions", "transfer"
 const TOP_OBJECTS = ["pronunciation", "first_attempt", "graph"];
 const ROLE_FIELDS = ["label", "part", "say", "ipa", "ipa_syllables", "sound_like", "meaning", "target", "look_for"];
 const OPTION_FIELDS = ["name", "wiki", "say", "connection", "qloo", "ipa", "image", "link"];
-const PROMPT_FIELDS = ["skill", "type", "question", "hint", "answer", "accept_all", "accept_any", "expected", "options", "misconceptions", "bonus"];
+const PROMPT_FIELDS = ["role", "skill", "type", "question", "hint", "answer", "accept_all", "accept_any", "expected", "options", "misconceptions", "bonus"];
 const META = new Set(["id", "version", "review_status", "reviewed_at", "edited_by", "edited_at", "history", "provisional", "promoted_from", "pending"]);
 
 const mergeFields = (target, patch, fields, at, problems) => {

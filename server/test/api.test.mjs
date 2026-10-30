@@ -748,6 +748,10 @@ test("learner brief: built after a word, a pick and an answer; the drafter and t
   assert.equal(r.restored_from, null);
   const text = await (await fetch(`http://localhost:${PORT}/api/admin/degrees?hours=1&format=text`, { headers: { "x-gloo-admin": "test-owner-token" } })).text();
   assert.match(text, /briefed: acc b\/p/); assert.doesNotMatch(text, /^restored from/);
+  // The thesis metric over the live rows: the answer on cck-chole after the Pepsi pick sits under its hook source at the now review.
+  const src = r.recall.sources.find((x) => ["taste", "editorial"].includes(x.source) && x.stages.now.answers >= 1);
+  assert.ok(src && src.stages.now.independent >= 1, JSON.stringify(r.recall.sources));
+  assert.match(text, /\nrecall by hook source\nhook +now +30m +4h +1d +3d +7d +total\n/); assert.match(text, /\nrecall by hook source and degree\n/); assert.match(text, /\nrecall by hook source and arm\n/);
   const ex = (await s("GET", "/api/export")).body;
   assert.equal(ex.learner_briefs.length, 1); assert.equal(ex.learner_briefs[0].text, (await brief()).text);
   const g = await (await fetch(`http://localhost:${PORT}/api/admin/learners/${sid}/graph`, { headers: { "x-gloo-admin": "test-owner-token" } })).json();
